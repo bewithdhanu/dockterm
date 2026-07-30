@@ -9,9 +9,14 @@ export function useElectronShell() {
   return api?.isElectron ? api : null;
 }
 
-export function TitleBar() {
+/**
+ * Frameless top chrome: brand + session tabs (children) + window controls.
+ */
+export function TitleBar({ children }) {
   const api = useElectronShell();
   const [maximized, setMaximized] = useState(false);
+  const isMac = api?.platform === 'darwin';
+  const isElectron = Boolean(api);
 
   useEffect(() => {
     if (!api?.isMaximized) return;
@@ -24,24 +29,30 @@ export function TitleBar() {
     };
   }, [api]);
 
-  if (!api) return null;
-
-  const isMac = api.platform === 'darwin';
-
   return (
     <header
-      className={`app-titlebar ${isMac ? 'is-mac' : 'is-win'}`}
+      className={`top-chrome ${isElectron ? 'is-electron' : ''} ${
+        isMac ? 'is-mac' : 'is-win'
+      }`}
       onDoubleClick={() => {
+        if (!api) return;
         api.maximize?.();
         api.isMaximized?.().then((v) => setMaximized(Boolean(v)));
       }}
     >
-      <div className="app-titlebar-drag">
-        <img className="app-titlebar-logo" src="/logo.png" alt="" draggable={false} />
-        <span className="app-titlebar-name">DockTerm</span>
+      <div className="top-chrome-brand">
+        <img
+          className="top-chrome-logo"
+          src="/logo.png"
+          alt=""
+          draggable={false}
+        />
+        <span className="top-chrome-name">DockTerm</span>
       </div>
 
-      {!isMac && (
+      <div className="top-chrome-tabs">{children}</div>
+
+      {isElectron && !isMac && (
         <div className="app-titlebar-controls">
           <button
             type="button"
@@ -65,7 +76,7 @@ export function TitleBar() {
           <button
             type="button"
             className="app-titlebar-btn close"
-            title="Close"
+            title="Hide"
             onClick={() => api.close()}
           >
             ×

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal } from './SshModals.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
+import { notifySnippetsChanged } from './SnippetsView.jsx';
 
 function previewCommand(command) {
   const lines = String(command || '')
@@ -12,7 +12,7 @@ function previewCommand(command) {
   return `${lines[0]} · ${lines.length} lines`;
 }
 
-function SnippetFormModal({ mode, initial, onClose, onSaved }) {
+function SnippetFormPanel({ mode, initial, onClose, onSaved }) {
   const [name, setName] = useState(initial?.name || '');
   const [command, setCommand] = useState(initial?.command || '');
   const [saving, setSaving] = useState(false);
@@ -42,6 +42,7 @@ function SnippetFormModal({ mode, initial, onClose, onSaved }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       onSaved(data.snippets || []);
+      notifySnippetsChanged();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -51,32 +52,35 @@ function SnippetFormModal({ mode, initial, onClose, onSaved }) {
   };
 
   return (
-    <Modal
-      title={mode === 'edit' ? `Edit ${initial?.name}` : 'Add snippet'}
-      onClose={onClose}
-      wide
-      footer={
-        <>
+    <div className="snippet-side-form">
+      <div className="detail-panel-header embedded side-form-header">
+        <div>
+          <div className="detail-panel-title">
+            {mode === 'edit' ? 'Edit snippet' : 'New snippet'}
+          </div>
+          <div className="detail-panel-sub">
+            {mode === 'edit'
+              ? initial?.name || 'Snippet'
+              : 'New snippet'}
+          </div>
+        </div>
+        <div className="detail-panel-header-actions">
           <button
             type="button"
-            className="btn ghost"
+            className="side-form-close"
             onClick={onClose}
-            disabled={saving}
+            title="Close"
+            aria-label="Close"
           >
-            Cancel
+            ×
           </button>
-          <button
-            type="submit"
-            form="snippet-form"
-            className="btn primary"
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </>
-      }
-    >
-      <form id="snippet-form" className="host-form snippet-form" onSubmit={submit}>
+        </div>
+      </div>
+
+      <form
+        className="host-form snippet-form snippet-side-form-body"
+        onSubmit={submit}
+      >
         {error && <div className="form-error">{error}</div>}
         <label>
           <span>Name</span>
@@ -94,26 +98,35 @@ function SnippetFormModal({ mode, initial, onClose, onSaved }) {
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             placeholder={'df -h\nfree -m\n'}
-            rows={10}
+            rows={12}
             required
             spellCheck={false}
           />
         </label>
         <p className="modal-hint">
-          Multi-line commands are pasted and executed on the active terminal.
+          Multi-line commands paste and run on the active terminal.
         </p>
+        <div className="side-form-actions">
+          <button
+            type="submit"
+            className="btn primary side-form-save"
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
       </form>
-    </Modal>
+    </div>
   );
 }
 
-export function SnippetsPanel({ collapsed, onToggle, onRun }) {
+/** Compact snippets list for the session right drawer (run on click). */
+export function SnippetsPanel({ onRun, onClose, embedded = false }) {
   const [snippets, setSnippets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
-  const [filePath, setFilePath] = useState('~/.ssh/shippets');
-  const [modal, setModal] = useState(null); // 'add' | { type:'edit', snippet }
+  const [modal, setModal] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
 
   const load = useCallback(async () => {
@@ -124,7 +137,6 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setSnippets(Array.isArray(data.snippets) ? data.snippets : []);
-      if (data.path) setFilePath(data.path);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSnippets([]);
@@ -135,6 +147,9 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
 
   useEffect(() => {
     load();
+    const onChanged = () => load();
+    window.addEventListener('dockterm-snippets-changed', onChanged);
+    return () => window.removeEventListener('dockterm-snippets-changed', onChanged);
   }, [load]);
 
   const filtered = useMemo(() => {
@@ -147,8 +162,6 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
     );
   }, [snippets, query]);
 
-  const displayPath = filePath.replace(/^\/Users\/[^/]+/, '~');
-
   const deleteSnippet = async (snippet) => {
     if (!confirm(`Delete snippet “${snippet.name}”?`)) return;
     try {
@@ -158,6 +171,7 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setSnippets(data.snippets || []);
+      notifySnippetsChanged();
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
@@ -166,18 +180,8 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
   const openMenu = (e, snippet) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({
-      x: e.clientX,
-      y: e.clientY,
-      snippet,
-    });
+    setCtxMenu({ x: e.clientX, y: e.clientY, snippet });
   };
-
-  const ctxItems = [
-    { id: 'run', label: 'Run' },
-    { id: 'edit', label: 'Edit…' },
-    { id: 'delete', label: 'Delete', danger: true },
-  ];
 
   const onCtxAction = (id) => {
     const snippet = ctxMenu?.snippet;
@@ -188,108 +192,118 @@ export function SnippetsPanel({ collapsed, onToggle, onRun }) {
     if (id === 'delete') deleteSnippet(snippet);
   };
 
-  if (collapsed) {
-    return (
-      <aside className="snippets-panel collapsed" aria-label="Snippets">
-        <button
-          type="button"
-          className="sidebar-expand"
-          onClick={onToggle}
-          title="Show snippets"
-        >
-          ‹
-        </button>
+  if (modal === 'add' || modal?.type === 'edit') {
+    const form = (
+      <SnippetFormPanel
+        mode={modal === 'add' ? 'add' : 'edit'}
+        initial={modal === 'add' ? null : modal.snippet}
+        onClose={() => setModal(null)}
+        onSaved={setSnippets}
+      />
+    );
+    return embedded ? (
+      <div className="snippets-embedded">{form}</div>
+    ) : (
+      <aside className="detail-panel snippets-drawer" aria-label="Snippets">
+        {form}
       </aside>
     );
   }
 
-  return (
+  const body = (
     <>
-      <aside className="snippets-panel" aria-label="Snippets">
-        <div className="sidebar-header">
-          <div className="sidebar-title">
+      <div className={`detail-panel-header ${embedded ? 'embedded' : ''}`}>
+        <div>
+          <div className="detail-panel-title">
             Snippets
             <span className="sidebar-count">{snippets.length}</span>
           </div>
-          <div className="sidebar-actions">
+        </div>
+        <div className="detail-panel-header-actions">
+          <button
+            type="button"
+            className="detail-icon-btn"
+            title="Add snippet"
+            onClick={() => setModal('add')}
+          >
+            +
+          </button>
+          {onClose ? (
             <button
               type="button"
-              title="Add snippet"
-              onClick={() => setModal('add')}
+              className="detail-panel-collapse"
+              onClick={onClose}
+              title="Close"
             >
-              +
-            </button>
-            <button type="button" title="Hide snippets" onClick={onToggle}>
               ›
             </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="detail-section">
+        <input
+          className="detail-search"
+          type="search"
+          placeholder="Filter snippets…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="snippets-drawer-list">
+        {loading && <div className="hosts-empty">Loading…</div>}
+        {!loading && error && (
+          <div className="hosts-empty error">{error}</div>
+        )}
+        {!loading && !error && filtered.length === 0 && (
+          <div className="hosts-empty">
+            {snippets.length === 0
+              ? 'No snippets yet — click + to add'
+              : 'No matches'}
           </div>
-        </div>
+        )}
+        {!loading &&
+          filtered.map((snippet) => (
+            <button
+              key={snippet.id}
+              type="button"
+              className="snippet-row"
+              onClick={() => onRun?.(snippet)}
+              onContextMenu={(e) => openMenu(e, snippet)}
+              title="Click to run · right-click for more"
+            >
+              <span className="snippet-row-name">{snippet.name}</span>
+              <span className="snippet-row-meta">
+                {previewCommand(snippet.command)}
+              </span>
+            </button>
+          ))}
+      </div>
+    </>
+  );
 
-        <div className="sidebar-toolbar snippets-toolbar">
-          <input
-            type="search"
-            placeholder="Filter snippets…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-
-        <div className="sidebar-path" title={filePath}>
-          {displayPath}
-        </div>
-
-        <div className="sidebar-list">
-          {loading && <div className="sidebar-empty">Loading…</div>}
-          {!loading && error && (
-            <div className="sidebar-empty error">{error}</div>
-          )}
-          {!loading && !error && filtered.length === 0 && (
-            <div className="sidebar-empty">
-              {snippets.length === 0
-                ? 'No snippets yet — click + to add'
-                : 'No matches'}
-            </div>
-          )}
-          {!loading &&
-            filtered.map((snippet) => (
-              <button
-                key={snippet.id}
-                type="button"
-                className="ssh-item snippet-item"
-                onClick={() => onRun?.(snippet)}
-                onContextMenu={(e) => openMenu(e, snippet)}
-                title="Click to run · right-click for more"
-              >
-                <span className="ssh-alias">{snippet.name}</span>
-                <span className="ssh-meta">{previewCommand(snippet.command)}</span>
-              </button>
-            ))}
-        </div>
-      </aside>
+  return (
+    <>
+      {embedded ? (
+        <div className="snippets-embedded">{body}</div>
+      ) : (
+        <aside className="detail-panel snippets-drawer" aria-label="Snippets">
+          {body}
+        </aside>
+      )}
 
       {ctxMenu && (
         <TabContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          items={ctxItems}
+          items={[
+            { id: 'run', label: 'Run' },
+            { id: 'edit', label: 'Edit…' },
+            { id: 'delete', label: 'Delete', danger: true },
+          ]}
           onAction={onCtxAction}
           onClose={() => setCtxMenu(null)}
-        />
-      )}
-
-      {modal === 'add' && (
-        <SnippetFormModal
-          mode="add"
-          onClose={() => setModal(null)}
-          onSaved={setSnippets}
-        />
-      )}
-      {modal?.type === 'edit' && (
-        <SnippetFormModal
-          mode="edit"
-          initial={modal.snippet}
-          onClose={() => setModal(null)}
-          onSaved={setSnippets}
         />
       )}
     </>

@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('dockterm', {
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  pickIdentityFile: () => ipcRenderer.invoke('dialog:pickIdentityFile'),
 });

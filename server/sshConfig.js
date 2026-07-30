@@ -14,6 +14,50 @@ function expandHome(p) {
   return p;
 }
 
+/** First OpenSSH config token; supports "quoted paths with spaces". */
+export function parseConfigToken(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  if (s[0] === '"') {
+    let out = '';
+    for (let i = 1; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '\\' && i + 1 < s.length) {
+        out += s[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === '"') return out;
+      out += ch;
+    }
+    return out;
+  }
+
+  if (s[0] === "'" && s.length >= 2 && s[s.length - 1] === "'") {
+    return s.slice(1, -1);
+  }
+
+  return s.split(/\s+/)[0];
+}
+
+function formatConfigPathArg(p) {
+  if (!p) return null;
+  const v = String(p).trim();
+  if (!v) return null;
+  if (/[\s"']/.test(v)) {
+    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+  return v;
+}
+
+function normalizeIdentityFile(raw) {
+  const token = parseConfigToken(raw);
+  if (!token) return null;
+  return expandHome(token);
+}
+
 function isWildcardHost(token) {
   return /[*?]/.test(token);
 }
@@ -198,7 +242,9 @@ function formatHostBlock({ alias, hostName, user, port, identityFile }) {
   if (hostName) lines.push(`  HostName ${hostName}`);
   if (user) lines.push(`  User ${user}`);
   if (port) lines.push(`  Port ${port}`);
-  if (identityFile) lines.push(`  IdentityFile ${identityFile}`);
+  if (identityFile) {
+    lines.push(`  IdentityFile ${formatConfigPathArg(identityFile)}`);
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -232,7 +278,7 @@ export function listSshHosts() {
         user: block.values.user || null,
         port: block.values.port || null,
         identityFile: block.values.identityfile
-          ? expandHome(block.values.identityfile.split(/\s+/)[0])
+          ? normalizeIdentityFile(block.values.identityfile)
           : null,
         editable: Boolean(block.isMain && block.singleAlias),
         sourceFile: block.sourceFile,

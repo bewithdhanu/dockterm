@@ -22,6 +22,9 @@ import {
   killCommandForPty,
   platformInfo,
 } from './sessionStats.js';
+import { pickIdentityFileNative } from './pickFile.js';
+import { readIdentityPreview } from './identityPreview.js';
+import { detectHostOs } from './detectHostOs.js';
 import {
   getProcessCwd,
   escapeShellArg,
@@ -108,6 +111,41 @@ app.delete('/api/ssh-hosts/:alias', (req, res) => {
     const alias = decodeURIComponent(req.params.alias);
     const result = deleteHost(alias);
     res.json({ ok: true, ...result, hosts: listSshHosts() });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: message });
+  }
+});
+
+app.post('/api/pick-identity-file', async (_req, res) => {
+  try {
+    const filePath = await pickIdentityFileNative();
+    if (!filePath) return res.json({ cancelled: true, path: null });
+    res.json({ cancelled: false, path: filePath });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+app.get('/api/identity-preview', (req, res) => {
+  try {
+    const filePath = req.query.path;
+    if (!filePath || typeof filePath !== 'string') {
+      return res.status(400).json({ error: 'path query required' });
+    }
+    res.json(readIdentityPreview(filePath));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: message });
+  }
+});
+
+app.get('/api/ssh-hosts/:alias/os', async (req, res) => {
+  try {
+    const alias = decodeURIComponent(req.params.alias);
+    const info = await detectHostOs(alias);
+    res.json({ ok: true, alias, ...info });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(400).json({ error: message });

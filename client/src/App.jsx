@@ -1,18 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TitleBar } from './TitleBar.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
-import { SshSidebar } from './SshSidebar.jsx';
-import { SnippetsPanel } from './SnippetsPanel.jsx';
+import { NavRail } from './NavRail.jsx';
+import { HostsView } from './HostsView.jsx';
+import {
+  SnippetsView,
+  SnippetDetailPanel,
+  nextCopySnippetName,
+  notifySnippetsChanged,
+} from './SnippetsView.jsx';
+import { HostDetailPanel } from './SshModals.jsx';
+import { SessionHostsRail } from './SessionHostsRail.jsx';
+import { RightDrawer } from './RightDrawer.jsx';
 import { ConfigEditorPane } from './ConfigEditorPane.jsx';
 import { MAX_PANES, TerminalSplitView } from './TerminalSplitView.jsx';
-import { loadSession, saveSession } from './sessionPersist.js';
+import { clearSession, saveSession } from './sessionPersist.js';
 import { endsWithShellPrompt } from './shellPrompt.js';
+import { nextCopyAlias, useSshHosts } from './useSshHosts.js';
+import { useHostOs } from './useHostOs.js';
 
 const SSH_CONFIG_TAB_ID = 'editor:ssh-config';
-const SNIPPETS_COLLAPSED_KEY = 'web-terminal.snippets-collapsed';
+const NAV_KEY = 'dockterm.nav-section';
+const SESSION_HOSTS_KEY = 'dockterm.session-hosts-open';
+const SESSION_SNIPPETS_KEY = 'dockterm.session-snippets-open';
 
-function readSnippetsCollapsed() {
-  return localStorage.getItem(SNIPPETS_COLLAPSED_KEY) === '1';
+function readNavSection() {
+  const v = localStorage.getItem(NAV_KEY);
+  if (v === 'hosts' || v === 'snippets') return v;
+  return 'hosts';
+}
+
+function readBool(key, fallback) {
+  const v = localStorage.getItem(key);
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false') return false;
+  return fallback;
 }
 
 function nextTitle(tabs) {
@@ -51,14 +73,23 @@ export default function App() {
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
   const closePaneRef = useRef(null);
-  const sidebarCollapsedRef = useRef(false);
-
   const [ctxMenu, setCtxMenu] = useState(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  sidebarCollapsedRef.current = sidebarCollapsed;
-  const [snippetsCollapsed, setSnippetsCollapsed] = useState(readSnippetsCollapsed);
+  const [mainView, setMainView] = useState('hosts'); // hosts | session
+  const [navSection, setNavSection] = useState(readNavSection);
+  /** @type {[null | { mode: 'add' | 'edit' | 'duplicate', snippet?: object }, Function]} */
+  const [snippetDetail, setSnippetDetail] = useState(null);
+  /** @type {[null | { mode: 'add' | 'edit' | 'duplicate', host?: object, sourceAlias?: string }, Function]} */
+  const [hostDetail, setHostDetail] = useState(null);
+  const [sessionHostsOpen, setSessionHostsOpen] = useState(() =>
+    readBool(SESSION_HOSTS_KEY, true)
+  );
+  const [sessionSnippetsOpen, setSessionSnippetsOpen] = useState(() =>
+    readBool(SESSION_SNIPPETS_KEY, true)
+  );
   const [dragTabId, setDragTabId] = useState(null);
   const [dropTarget, setDropTarget] = useState(null); // { id, zone: 'right'|'bottom' }
+  const hostsApi = useSshHosts();
+  const hostOs = useHostOs();
 
   const registerHandlers = useCallback((id, handlers) => {
     handlersRef.current.set(id, handlers);
@@ -105,12 +136,14 @@ export default function App() {
 
   const persistSession = useCallback(() => {
     const currentTabs = tabsRef.current;
-    if (!currentTabs.length) return;
+    if (!currentTabs.length) {
+      clearSession();
+      return;
+    }
     const snapshot = {
       version: 1,
       savedAt: Date.now(),
       activeId: activeIdRef.current,
-      sidebarCollapsed: sidebarCollapsedRef.current,
       tabs: currentTabs.map((t) => {
         if (t.kind === 'editor') {
           return { id: t.id, title: t.title, kind: 'editor' };
@@ -155,124 +188,6 @@ export default function App() {
 
     let closed = false;
     let retryTimer;
-
-    const bootstrapFromSnapshot = (ws, snap) => {
-      if (typeof snap.sidebarCollapsed === 'boolean') {
-        setSidebarCollapsed(snap.sidebarCollapsed);
-      }
-
-      let createCount = 0;
-      const seeded = [];
-      for (const t of snap.tabs || []) {
-        if (t.kind === 'editor') {
-          seeded.push({
-            id: t.id || SSH_CONFIG_TAB_ID,
-            title: t.title || '~/.ssh/config',
-            kind: 'editor',
-          });
-          continue;
-        }
-
-        const tabId = t.id || groupId();
-        const paneMetas = Array.isArray(t.panes) ? t.panes : [];
-        seeded.push({
-          id: tabId,
-          title: t.title || 'Terminal',
-          kind: 'terminal',
-          direction: t.direction === 'column' ? 'column' : 'row',
-          panes: [],
-          focusedPaneId: null,
-          _restoreExpected: Math.max(1, paneMetas.length),
-          _restoreFocusIndex: t.focusedPaneIndex ?? 0,
-          _restoreSlots: Array(Math.max(1, paneMetas.length)).fill(null),
-        });
-
-        if (!paneMetas.length) {
-          createCount += 1;
-          const clientKey = newClientKey();
-          pendingByKeyRef.current.set(clientKey, {
-            restore: {
-              tabId,
-              paneIndex: 0,
-              scrollback: '',
-              ssh: null,
-              cwd: null,
-            },
-            title: t.title,
-          });
-          ws.send(
-            JSON.stringify({
-              type: 'create',
-              clientKey,
-              cols: 80,
-              rows: 24,
-              title: t.title,
-            })
-          );
-          continue;
-        }
-
-        paneMetas.forEach((p, paneIndex) => {
-          createCount += 1;
-          const clientKey = newClientKey();
-          pendingByKeyRef.current.set(clientKey, {
-            restore: {
-              tabId,
-              paneIndex,
-              scrollback: p.scrollback || '',
-              ssh: p.ssh || null,
-              cwd: p.cwd || null,
-            },
-            title: t.title,
-            ssh: p.ssh || undefined,
-            cwd: p.cwd || undefined,
-          });
-          ws.send(
-            JSON.stringify({
-              type: 'create',
-              clientKey,
-              cols: p.cols || 80,
-              rows: p.rows || 24,
-              title: t.title,
-              ssh: p.ssh || undefined,
-              cwd: p.cwd || undefined,
-              remoteCwd: p.ssh ? p.cwd || undefined : undefined,
-            })
-          );
-        });
-      }
-
-      if (!seeded.length) {
-        const clientKey = newClientKey();
-        pendingByKeyRef.current.set(clientKey, { title: 'Terminal 1' });
-        ws.send(
-          JSON.stringify({
-            type: 'create',
-            clientKey,
-            cols: 80,
-            rows: 24,
-            title: 'Terminal 1',
-          })
-        );
-        return;
-      }
-
-      restorePendingRef.current = createCount;
-      resumeLockRef.current = createCount > 0;
-      if (createCount > 0) {
-        setTimeout(() => {
-          if (resumeLockRef.current) {
-            resumeLockRef.current = false;
-            restorePendingRef.current = 0;
-          }
-        }, 15000);
-      }
-
-      setTabs(seeded);
-      const active =
-        seeded.find((t) => t.id === snap.activeId)?.id || seeded[0]?.id || null;
-      setActiveId(active);
-    };
 
     const resumeAfterReconnect = (ws) => {
       const current = tabsRef.current;
@@ -358,21 +273,12 @@ export default function App() {
         setConnected(true);
         if (!bootstrapped.current) {
           bootstrapped.current = true;
-          const snap = loadSession();
-          if (snap?.tabs?.length) bootstrapFromSnapshot(ws, snap);
-          else {
-            const clientKey = newClientKey();
-            pendingByKeyRef.current.set(clientKey, { title: 'Terminal 1' });
-            ws.send(
-              JSON.stringify({
-                type: 'create',
-                clientKey,
-                cols: 80,
-                rows: 24,
-                title: 'Terminal 1',
-              })
-            );
-          }
+          // Do not auto-restore SSH/terminal sessions on page load/refresh.
+          // Stay on the hosts screen until the user opens a connection.
+          clearSession();
+          setMainView('hosts');
+          setTabs([]);
+          setActiveId(null);
         } else {
           // Recreate PTYs after server dropped them; skip if restore already in flight.
           resumeAfterReconnect(ws);
@@ -613,6 +519,7 @@ export default function App() {
 
   const addTab = useCallback(
     (opts = {}) => {
+      setMainView('session');
       requestCreate(
         {
           afterId: opts.afterId,
@@ -749,6 +656,7 @@ export default function App() {
       ];
     });
     setActiveId(SSH_CONFIG_TAB_ID);
+    setMainView('session');
   }, []);
 
   const closeTabsByIds = useCallback(
@@ -779,6 +687,10 @@ export default function App() {
             .find((t) => !idSet.has(t.id));
           return left?.id ?? next[next.length - 1]?.id ?? null;
         });
+        if (next.length === 0) {
+          clearSession();
+          queueMicrotask(() => setMainView('hosts'));
+        }
         return next;
       });
     },
@@ -1126,7 +1038,8 @@ export default function App() {
     };
   }, [persistSession]);
 
-  // Block browser context menu everywhere except tab bar (custom) and terminals.
+  // Native browser context menu only in terminals, editors, and text fields.
+  // Everywhere else: block default (custom menus handle their own areas).
   useEffect(() => {
     const onContextMenu = (e) => {
       const el = e.target;
@@ -1135,12 +1048,15 @@ export default function App() {
         return;
       }
       if (
-        el.closest('.tabbar') ||
-        el.closest('.sidebar') ||
-        el.closest('.snippets-panel') ||
-        el.closest('.ctx-menu') ||
+        el.closest('input') ||
+        el.closest('textarea') ||
+        el.closest('select') ||
+        el.closest('[contenteditable="true"]') ||
+        el.closest('.xterm') ||
         el.closest('.terminal-host') ||
-        el.closest('.xterm')
+        el.closest('.monaco-editor') ||
+        el.closest('.editor-pane') ||
+        el.closest('.allow-native-menu')
       ) {
         return;
       }
@@ -1153,9 +1069,11 @@ export default function App() {
 
   const connectSsh = useCallback(
     (host) => {
+      hostsApi.markRecent(host.alias);
+      setMainView('session');
       addTab({ title: host.alias, ssh: host.alias });
     },
-    [addTab]
+    [addTab, hostsApi]
   );
 
   const runSnippet = useCallback(
@@ -1179,19 +1097,38 @@ export default function App() {
     [send]
   );
 
-  const toggleSnippetsCollapsed = useCallback(() => {
-    setSnippetsCollapsed((v) => {
-      const next = !v;
-      localStorage.setItem(SNIPPETS_COLLAPSED_KEY, next ? '1' : '0');
-      return next;
-    });
+  const selectNav = useCallback(
+    (id) => {
+      if (id === 'config') {
+        openConfigEditor();
+        setMainView('session');
+        return;
+      }
+      setNavSection(id);
+      localStorage.setItem(NAV_KEY, id === 'snippets' ? 'snippets' : 'hosts');
+      if (id === 'hosts' || id === 'snippets') {
+        setMainView('hosts');
+      }
+      if (id !== 'snippets') setSnippetDetail(null);
+      if (id === 'snippets') setHostDetail(null);
+    },
+    [openConfigEditor]
+  );
+
+  const setSessionHosts = useCallback((open) => {
+    setSessionHostsOpen(open);
+    localStorage.setItem(SESSION_HOSTS_KEY, open ? '1' : '0');
   }, []);
 
-  const activeTab = useMemo(
-    () => tabs.find((t) => t.id === activeId) || null,
-    [tabs, activeId]
-  );
-  const showSnippets = activeTab?.kind === 'terminal';
+  const setSessionSnippets = useCallback((open) => {
+    setSessionSnippetsOpen(open);
+    localStorage.setItem(SESSION_SNIPPETS_KEY, open ? '1' : '0');
+  }, []);
+
+  const openSessionTab = useCallback((tabId) => {
+    setActiveId(tabId);
+    setMainView('session');
+  }, []);
 
   const sshHostStatuses = useMemo(() => {
     /** @type {Map<string, 'connecting' | 'connected'>} */
@@ -1207,7 +1144,6 @@ export default function App() {
           (p.sshStatus === 'connected' || !p.sshStatus) &&
           cur !== 'connecting'
         ) {
-          // Legacy panes without sshStatus still count as connected if alive.
           map.set(p.ssh, 'connected');
         }
       }
@@ -1215,190 +1151,439 @@ export default function App() {
     return map;
   }, [tabs]);
 
+  useEffect(() => {
+    for (const [alias, status] of sshHostStatuses) {
+      if (status === 'connected') hostOs.ensure(alias);
+    }
+  }, [sshHostStatuses, hostOs.ensure]);
+
+  const openConfigAndShow = useCallback(() => {
+    openConfigEditor();
+    setMainView('session');
+  }, [openConfigEditor]);
+
   return (
     <div className="app">
-      <TitleBar />
-      <div className="workspace">
-        <SshSidebar
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed((v) => !v)}
-          onConnect={connectSsh}
-          onOpenConfig={openConfigEditor}
-          hostStatuses={sshHostStatuses}
-        />
-
-        <div className="main-col">
-          <div className="tabbar" onContextMenu={(e) => openCtxMenu(e, null)}>
-            <div className="tabs" onContextMenu={(e) => openCtxMenu(e, null)}>
-              {tabs.map((tab) => {
-                const isDrop =
-                  dropTarget?.id === tab.id &&
-                  dragTabId &&
-                  dragTabId !== tab.id;
-                return (
-                  <div
-                    key={tab.id}
-                    className={`tab-wrap ${isDrop ? `drop-${dropTarget.zone}` : ''}`}
-                    draggable={tab.kind === 'terminal'}
-                    onDragStart={(e) => {
-                      if (tab.kind !== 'terminal') return;
-                      setDragTabId(tab.id);
-                      e.dataTransfer.setData('text/tab-id', tab.id);
-                      e.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onDragEnd={() => {
-                      setDragTabId(null);
-                      setDropTarget(null);
-                    }}
-                    onDragOver={(e) => {
-                      if (!dragTabId || dragTabId === tab.id) return;
-                      if (tab.kind !== 'terminal') return;
-                      e.preventDefault();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const relY = (e.clientY - rect.top) / rect.height;
-                      const zone = relY > 0.55 ? 'bottom' : 'right';
-                      setDropTarget({ id: tab.id, zone });
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget)) {
-                        setDropTarget((cur) =>
-                          cur?.id === tab.id ? null : cur
-                        );
-                      }
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const sourceId =
-                        e.dataTransfer.getData('text/tab-id') || dragTabId;
-                      const zone = dropTarget?.id === tab.id
-                        ? dropTarget.zone
-                        : 'right';
-                      setDragTabId(null);
-                      setDropTarget(null);
-                      if (!sourceId || sourceId === tab.id) return;
-                      if (tab.kind !== 'terminal') return;
-                      mergeTabs(
-                        sourceId,
-                        tab.id,
-                        zone === 'bottom' ? 'column' : 'row'
+      <TitleBar>
+        <div className="tabbar" onContextMenu={(e) => openCtxMenu(e, null)}>
+          <button
+            type="button"
+            className={`tab home-tab ${mainView === 'hosts' ? 'active' : ''}`}
+            onClick={() => selectNav('hosts')}
+            title="Hosts"
+          >
+            <span className="tab-title">Hosts</span>
+          </button>
+          <div className="tabs" onContextMenu={(e) => openCtxMenu(e, null)}>
+            {tabs.map((tab) => {
+              const isDrop =
+                dropTarget?.id === tab.id &&
+                dragTabId &&
+                dragTabId !== tab.id;
+              return (
+                <div
+                  key={tab.id}
+                  className={`tab-wrap ${isDrop ? `drop-${dropTarget.zone}` : ''}`}
+                  draggable={tab.kind === 'terminal'}
+                  onDragStart={(e) => {
+                    if (tab.kind !== 'terminal') return;
+                    setDragTabId(tab.id);
+                    e.dataTransfer.setData('text/tab-id', tab.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragEnd={() => {
+                    setDragTabId(null);
+                    setDropTarget(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (!dragTabId || dragTabId === tab.id) return;
+                    if (tab.kind !== 'terminal') return;
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const relY = (e.clientY - rect.top) / rect.height;
+                    const zone = relY > 0.55 ? 'bottom' : 'right';
+                    setDropTarget({ id: tab.id, zone });
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget)) {
+                      setDropTarget((cur) =>
+                        cur?.id === tab.id ? null : cur
                       );
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const sourceId =
+                      e.dataTransfer.getData('text/tab-id') || dragTabId;
+                    const zone =
+                      dropTarget?.id === tab.id ? dropTarget.zone : 'right';
+                    setDragTabId(null);
+                    setDropTarget(null);
+                    if (!sourceId || sourceId === tab.id) return;
+                    if (tab.kind !== 'terminal') return;
+                    mergeTabs(
+                      sourceId,
+                      tab.id,
+                      zone === 'bottom' ? 'column' : 'row'
+                    );
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`tab ${
+                      mainView === 'session' && tab.id === activeId
+                        ? 'active'
+                        : ''
+                    } ${tab.kind === 'editor' ? 'editor-tab' : ''}`}
+                    onClick={() => openSessionTab(tab.id)}
+                    onContextMenu={(e) => openCtxMenu(e, tab.id)}
+                    onDoubleClick={() => {
+                      if (tab.kind === 'editor') return;
+                      const name = prompt('Tab name', tab.title);
+                      if (name) renameTab(tab.id, name.trim());
                     }}
                   >
+                    <span className="tab-title">
+                      {tab.kind === 'editor' ? tab.title : tab.title}
+                    </span>
+                    <span
+                      className="tab-close"
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => closeTab(tab.id, e)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ')
+                          closeTab(tab.id, e);
+                      }}
+                      title="Close tab"
+                    >
+                      ×
+                    </span>
+                  </button>
+                  {isDrop && (
+                    <div className="tab-drop-hint">
+                      {dropTarget.zone === 'bottom'
+                        ? 'Merge below'
+                        : 'Merge right'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              className="new-tab"
+              onClick={() => {
+                setMainView('session');
+                addTab();
+              }}
+              onContextMenu={(e) => openCtxMenu(e, null)}
+              title="New terminal"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </TitleBar>
+
+      <div className="workspace">
+        {mainView === 'hosts' ? (
+          <NavRail
+            active={navSection === 'snippets' ? 'snippets' : 'hosts'}
+            onSelect={selectNav}
+          />
+        ) : sessionHostsOpen ? (
+          <SessionHostsRail
+            hostsApi={hostsApi}
+            hostStatuses={sshHostStatuses}
+            hostOsByAlias={hostOs.osByAlias}
+            onConnect={connectSsh}
+            onCollapse={() => setSessionHosts(false)}
+            onOpenEditHost={(host) => {
+              setSnippetDetail(null);
+              setHostDetail({ mode: 'edit', host });
+            }}
+            onOpenDuplicateHost={(host, sourceAlias) => {
+              setSnippetDetail(null);
+              setHostDetail({ mode: 'duplicate', host, sourceAlias });
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="edge-reopen left"
+            title="Show hosts"
+            onClick={() => setSessionHosts(true)}
+          >
+            ›
+            <span>Hosts</span>
+          </button>
+        )}
+
+        <div className="main-col">
+          {mainView === 'hosts' ? (
+            navSection === 'snippets' ? (
+              <SnippetsView
+                selectedId={
+                  snippetDetail?.mode === 'edit'
+                    ? snippetDetail.snippet?.id
+                    : null
+                }
+                onOpenNew={() => {
+                  setHostDetail(null);
+                  setSnippetDetail({ mode: 'add' });
+                }}
+                onOpenEdit={(snippet) => {
+                  setHostDetail(null);
+                  setSnippetDetail({ mode: 'edit', snippet });
+                }}
+                onOpenDuplicate={(snippet) => {
+                  setHostDetail(null);
+                  setSnippetDetail({ mode: 'duplicate', snippet });
+                }}
+                onDeleted={(id) => {
+                  setSnippetDetail((cur) =>
+                    cur?.mode === 'edit' && cur.snippet?.id === id
+                      ? null
+                      : cur
+                  );
+                }}
+                onOpenTerminal={() => {
+                  setMainView('session');
+                  addTab();
+                }}
+                onOpenConfig={openConfigAndShow}
+              />
+            ) : (
+              <HostsView
+                hostsApi={hostsApi}
+                hostStatuses={sshHostStatuses}
+                hostOsByAlias={hostOs.osByAlias}
+                selectedAlias={
+                  hostDetail?.mode === 'edit' ? hostDetail.host?.alias : null
+                }
+                onConnect={connectSsh}
+                onOpenTerminal={() => {
+                  setMainView('session');
+                  addTab();
+                }}
+                onOpenConfig={openConfigAndShow}
+                onOpenNewHost={() => {
+                  setSnippetDetail(null);
+                  setHostDetail({ mode: 'add' });
+                }}
+                onOpenEditHost={(host) => {
+                  setSnippetDetail(null);
+                  setHostDetail({ mode: 'edit', host });
+                }}
+                onOpenDuplicateHost={(host, sourceAlias) => {
+                  setSnippetDetail(null);
+                  setHostDetail({ mode: 'duplicate', host, sourceAlias });
+                }}
+              />
+            )
+          ) : (
+            <main className="panes">
+              {tabs.length === 0 && (
+                <div className="empty">
+                  {connected ? (
                     <button
                       type="button"
-                      className={`tab ${tab.id === activeId ? 'active' : ''} ${
-                        tab.kind === 'editor' ? 'editor-tab' : ''
-                      }`}
-                      onClick={() => setActiveId(tab.id)}
-                      onContextMenu={(e) => openCtxMenu(e, tab.id)}
-                      onDoubleClick={() => {
-                        if (tab.kind === 'editor') return;
-                        const name = prompt('Tab name', tab.title);
-                        if (name) renameTab(tab.id, name.trim());
+                      onClick={() => {
+                        setMainView('hosts');
                       }}
                     >
-                      <span className="tab-title">
-                        {tab.kind === 'editor' ? `📄 ${tab.title}` : tab.title}
-                      </span>
-                      <span
-                        className="tab-close"
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => closeTab(tab.id, e)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ')
-                            closeTab(tab.id, e);
-                        }}
-                        title="Close tab"
-                      >
-                        ×
-                      </span>
+                      Browse hosts
                     </button>
-                    {isDrop && (
-                      <div className="tab-drop-hint">
-                        {dropTarget.zone === 'bottom'
-                          ? 'Merge below'
-                          : 'Merge right'}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <button
-                type="button"
-                className="new-tab"
-                onClick={() => addTab()}
-                onContextMenu={(e) => openCtxMenu(e, null)}
-                title="New tab"
-              >
-                +
-              </button>
-            </div>
-          </div>
-
-          <main className="panes">
-            {tabs.length === 0 && (
-              <div className="empty">
-                {connected ? (
-                  <button type="button" onClick={() => addTab()}>
-                    Open a terminal
-                  </button>
-                ) : (
-                  <p>Connecting to PTY server…</p>
-                )}
-              </div>
-            )}
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={`pane ${tab.id === activeId ? 'visible' : 'hidden'}`}
-              >
-                {tab.kind === 'editor' ? (
-                  <ConfigEditorPane
-                    active={tab.id === activeId}
-                    onHostsChanged={() => {
-                      window.dispatchEvent(new Event('ssh-hosts-changed'));
-                    }}
-                  />
-                ) : tab._restoreExpected &&
-                  (!tab.panes?.length ||
-                    tab.panes.length < tab._restoreExpected) ? (
-                  <div className="empty">
-                    <p>Restoring session…</p>
-                  </div>
-                ) : (
-                  <TerminalSplitView
-                    tab={tab}
-                    active={tab.id === activeId}
-                    focusedPaneId={tab.focusedPaneId}
-                    onFocusPane={(paneId) => focusPane(tab.id, paneId)}
-                    onClosePane={(paneId) => closePane(tab.id, paneId)}
-                    send={send}
-                    connected={connected}
-                    registerHandlers={registerHandlers}
-                    registerStatsHandlers={registerStatsHandlers}
-                    registerSerializer={registerSerializer}
-                    onPaneTitle={(paneId, title) => {
-                      if (tab.panes[0]?.id === paneId && title) {
-                        renameTab(tab.id, title);
+                  ) : (
+                    <p>Connecting to PTY server…</p>
+                  )}
+                </div>
+              )}
+              {tabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`pane ${
+                    tab.id === activeId ? 'visible' : 'hidden'
+                  }`}
+                >
+                  {tab.kind === 'editor' ? (
+                    <ConfigEditorPane
+                      active={tab.id === activeId}
+                      onHostsChanged={() => {
+                        window.dispatchEvent(new Event('ssh-hosts-changed'));
+                      }}
+                    />
+                  ) : tab._restoreExpected &&
+                    (!tab.panes?.length ||
+                      tab.panes.length < tab._restoreExpected) ? (
+                    <div className="empty">
+                      <p>Restoring session…</p>
+                    </div>
+                  ) : (
+                    <TerminalSplitView
+                      tab={tab}
+                      active={tab.id === activeId}
+                      focusedPaneId={tab.focusedPaneId}
+                      onFocusPane={(paneId) => focusPane(tab.id, paneId)}
+                      onClosePane={(paneId) => closePane(tab.id, paneId)}
+                      send={send}
+                      connected={connected}
+                      registerHandlers={registerHandlers}
+                      registerStatsHandlers={registerStatsHandlers}
+                      registerSerializer={registerSerializer}
+                      onPaneTitle={(paneId, title) => {
+                        if (tab.panes[0]?.id === paneId && title) {
+                          renameTab(tab.id, title);
+                        }
+                      }}
+                      onPaneCwd={(paneId, cwd) =>
+                        updatePaneCwd(tab.id, paneId, cwd)
                       }
-                    }}
-                    onPaneCwd={(paneId, cwd) =>
-                      updatePaneCwd(tab.id, paneId, cwd)
-                    }
-                  />
-                )}
-              </div>
-            ))}
-          </main>
+                    />
+                  )}
+                </div>
+              ))}
+            </main>
+          )}
         </div>
 
-        {showSnippets && (
-          <SnippetsPanel
-            collapsed={snippetsCollapsed}
-            onToggle={toggleSnippetsCollapsed}
-            onRun={runSnippet}
+        {hostDetail && (
+          <HostDetailPanel
+            key={
+              hostDetail.mode === 'edit'
+                ? `edit-${hostDetail.host?.alias}`
+                : hostDetail.mode === 'duplicate'
+                  ? `dup-${hostDetail.sourceAlias || hostDetail.host?.alias}`
+                  : 'add'
+            }
+            mode={hostDetail.mode === 'edit' ? 'edit' : hostDetail.mode === 'duplicate' ? 'duplicate' : 'add'}
+            initial={hostDetail.mode === 'add' ? null : hostDetail.host}
+            titleOverride={
+              hostDetail.mode === 'duplicate'
+                ? `Duplicate ${hostDetail.sourceAlias || hostDetail.host?.alias || ''}`
+                : undefined
+            }
+            onClose={() => setHostDetail(null)}
+            onSaved={(hosts, saved) => {
+              hostsApi.onHostsSaved?.(hosts);
+              if (saved) {
+                setHostDetail({ mode: 'edit', host: saved });
+                return;
+              }
+              setHostDetail(null);
+            }}
+            onDuplicate={(host) => {
+              const alias = nextCopyAlias(
+                host.alias || 'host',
+                hostsApi.hosts || []
+              );
+              setHostDetail({
+                mode: 'duplicate',
+                host: { ...host, alias },
+                sourceAlias: host.alias,
+              });
+            }}
+            onDelete={(host) => {
+              hostsApi.deleteHost?.(host);
+              setHostDetail(null);
+            }}
           />
+        )}
+
+        {mainView === 'hosts' &&
+          navSection === 'snippets' &&
+          snippetDetail &&
+          !hostDetail && (
+            <SnippetDetailPanel
+              key={
+                snippetDetail.mode === 'edit'
+                  ? `edit-${snippetDetail.snippet?.id}`
+                  : snippetDetail.mode === 'duplicate'
+                    ? `dup-${snippetDetail.snippet?.name}-${snippetDetail.snippet?.command?.length || 0}`
+                    : 'add'
+              }
+              mode={snippetDetail.mode === 'edit' ? 'edit' : 'add'}
+              initial={
+                snippetDetail.mode === 'add' ? null : snippetDetail.snippet
+              }
+              onClose={() => setSnippetDetail(null)}
+              onSaved={(_list, saved) => {
+                notifySnippetsChanged();
+                if (saved) {
+                  setSnippetDetail({ mode: 'edit', snippet: saved });
+                } else {
+                  setSnippetDetail(null);
+                }
+              }}
+              onDuplicate={(snippet) => {
+                fetch('/api/snippets')
+                  .then((r) => r.json())
+                  .then((data) => {
+                    const all = Array.isArray(data.snippets)
+                      ? data.snippets
+                      : [];
+                    setSnippetDetail({
+                      mode: 'duplicate',
+                      snippet: {
+                        name: nextCopySnippetName(
+                          snippet.name || 'Snippet',
+                          all
+                        ),
+                        command: snippet.command || '',
+                      },
+                    });
+                  })
+                  .catch(() => {
+                    setSnippetDetail({
+                      mode: 'duplicate',
+                      snippet: {
+                        name: nextCopySnippetName(
+                          snippet.name || 'Snippet',
+                          []
+                        ),
+                        command: snippet.command || '',
+                      },
+                    });
+                  });
+              }}
+              onDelete={async (snippet) => {
+                if (!confirm(`Delete snippet “${snippet.name}”?`)) return;
+                try {
+                  const res = await fetch(
+                    `/api/snippets/${encodeURIComponent(snippet.id)}`,
+                    { method: 'DELETE' }
+                  );
+                  const data = await res.json();
+                  if (!res.ok) {
+                    throw new Error(data.error || `HTTP ${res.status}`);
+                  }
+                  notifySnippetsChanged();
+                  setSnippetDetail(null);
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            />
+          )}
+
+        {mainView === 'session' && sessionSnippetsOpen && !hostDetail && (
+          <RightDrawer
+            onRun={runSnippet}
+            onClose={() => setSessionSnippets(false)}
+          />
+        )}
+
+        {mainView === 'session' && !sessionSnippetsOpen && !hostDetail && (
+          <button
+            type="button"
+            className="edge-reopen right"
+            title="Show sidebar"
+            onClick={() => setSessionSnippets(true)}
+          >
+            <span>Sidebar</span>
+            ‹
+          </button>
         )}
       </div>
 

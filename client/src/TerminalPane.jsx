@@ -5,6 +5,13 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 import { MAX_SCROLLBACK_ROWS } from './sessionPersist.js';
+import {
+  TERM_THEME_EVENT,
+  applyTermBgCssVar,
+  getTermTheme,
+  getTermFontFamily,
+  getTermFontSize,
+} from './terminalThemes.js';
 
 function stripAnsi(text) {
   return String(text || '')
@@ -122,39 +129,19 @@ export function TerminalPane({
     const el = containerRef.current;
     if (!el) return;
 
+    applyTermBgCssVar();
+
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: 'block',
-      fontFamily:
-        '"MesloLGS NF", "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace',
-      fontSize: 14,
-      lineHeight: 1.05,
+      cursorStyle: 'bar',
+      cursorWidth: 2,
+      fontFamily: getTermFontFamily(),
+      fontSize: getTermFontSize(),
+      lineHeight: 1.2,
       letterSpacing: 0,
       fontWeight: '400',
       fontWeightBold: '700',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#cccccc',
-        cursor: '#aeafad',
-        cursorAccent: '#1e1e1e',
-        selectionBackground: '#264f78',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#e5e5e5',
-      },
+      theme: getTermTheme(),
       allowProposedApi: true,
       scrollback: 10000,
       macOptionIsMeta: true,
@@ -336,6 +323,36 @@ export function TerminalPane({
       serializeRef.current = null;
     };
   }, [id, registerHandlers, registerSerializer, isSsh, sshHost]);
+
+  useEffect(() => {
+    const onTheme = (e) => {
+      const term = termRef.current;
+      const fit = fitRef.current;
+      if (!term) return;
+      try {
+        const theme = e?.detail?.theme || getTermTheme();
+        const fontFamily = e?.detail?.fontFamily || getTermFontFamily();
+        const fontSize = e?.detail?.fontSize || getTermFontSize();
+        term.options.theme = theme;
+        term.options.fontFamily = fontFamily;
+        term.options.fontSize = fontSize;
+        term.refresh(0, term.rows - 1);
+        if (fit) {
+          fit.fit();
+          sendRef.current({
+            type: 'resize',
+            id,
+            cols: term.cols,
+            rows: term.rows,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener(TERM_THEME_EVENT, onTheme);
+    return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
+  }, [id]);
 
   useEffect(() => {
     if (!visible) return;

@@ -9,6 +9,7 @@ let mainWindow = null;
 /** @type {import('child_process').ChildProcess | null} */
 let serverProc = null;
 let serverPort = null;
+let isQuitting = false;
 
 const PREFERRED_PORT = 39281;
 
@@ -56,6 +57,23 @@ function resolveNodeBinary() {
   throw new Error(
     'DockTerm needs Node.js 20–22 to run terminals.\n\nInstall from https://nodejs.org or: brew install node@22'
   );
+}
+
+function probeServer(port, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: '127.0.0.1', port, path: '/api/snippets', timeout: timeoutMs },
+      (res) => {
+        res.resume();
+        resolve(true);
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
 }
 
 function waitForServer(port, timeoutMs = 20000) {
@@ -119,8 +137,38 @@ function startBackend() {
   });
 }
 
+async function ensureBackend() {
+  if (serverPort && (await probeServer(serverPort))) {
+    return serverPort;
+  }
+  if (await probeServer(PREFERRED_PORT)) {
+    serverPort = PREFERRED_PORT;
+    return serverPort;
+  }
+  return startBackend();
+}
+
+function hideMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Close acts as minimize-to-background; keep UI process + backend + WS.
+  if (mainWindow.isMinimized()) return;
+  mainWindow.minimize();
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 function wireWindowControls() {
   ipcMain.removeHandler('window:isMaximized');
+  ipcMain.removeHandler('dialog:pickIdentityFile');
+  ipcMain.removeAllListeners('window:minimize');
+  ipcMain.removeAllListeners('window:maximize');
+  ipcMain.removeAllListeners('window:close');
+
   ipcMain.on('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize();
   });
@@ -131,24 +179,37 @@ function wireWindowControls() {
     else win.maximize();
   });
   ipcMain.on('window:close', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    // Close = hide to background (do not quit / kill backend).
+    if (win === mainWindow) hideMainWindow();
+    else win.close();
   });
   ipcMain.handle('window:isMaximized', (event) => {
     return Boolean(BrowserWindow.fromWebContents(event.sender)?.isMaximized());
   });
+  ipcMain.handle('dialog:pickIdentityFile', async (event) => {
+    const { dialog } = require('electron');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win || undefined, {
+      title: 'Select SSH identity file',
+      properties: ['openFile'],
+      defaultPath: require('os').homedir() + '/.ssh',
+    });
+    if (result.canceled || !result.filePaths?.[0]) return null;
+    return result.filePaths[0];
+  });
 }
 
-async function createWindow() {
-  const port = await startBackend();
+function buildWindowOptions() {
   const icon = resolveIcon();
-
   const windowOpts = {
     width: 1320,
     height: 860,
     minWidth: 880,
     minHeight: 560,
     title: 'DockTerm',
-    backgroundColor: '#141414',
+    backgroundColor: '#1a1c23',
     show: false,
     autoHideMenuBar: true,
     icon,
@@ -168,7 +229,11 @@ async function createWindow() {
     windowOpts.frame = false;
   }
 
-  mainWindow = new BrowserWindow(windowOpts);
+  return windowOpts;
+}
+
+async function createWindow() {
+  mainWindow = new BrowserWindow(buildWindowOptions());
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -179,11 +244,28 @@ async function createWindow() {
     return { action: 'deny' };
   });
 
-  await mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  // Close / red traffic light → hide; keep backend + WS alive until Quit.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      hideMainWindow();
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Show splash immediately while backend boots.
+  const splashPath = path.join(__dirname, 'splash.html');
+  await mainWindow.loadFile(splashPath);
+
+  try {
+    const port = await ensureBackend();
+    await mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  } catch (err) {
+    throw err;
+  }
 }
 
 function shutdown() {
@@ -215,25 +297,35 @@ app.whenReady().then(() => {
     console.error('DockTerm failed to start:', err);
     const { dialog } = require('electron');
     dialog.showErrorBox('DockTerm failed to start', String(err?.message || err));
+    isQuitting = true;
     app.quit();
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
       createWindow().catch((err) => {
         console.error(err);
         const { dialog } = require('electron');
-        dialog.showErrorBox('DockTerm failed to start', String(err?.message || err));
+        dialog.showErrorBox(
+          'DockTerm failed to start',
+          String(err?.message || err)
+        );
       });
+      return;
     }
+    showMainWindow();
   });
 });
 
+// Keep running in background when the window is hidden.
 app.on('window-all-closed', () => {
-  shutdown();
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' && !isQuitting) {
+    // Window was destroyed somehow — still keep process if we intend background.
+    // Actual quit happens via before-quit / explicit Quit.
+  }
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   shutdown();
 });
