@@ -2,6 +2,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
+import { pidsForLocalPort } from './processInfo.js';
+import { hasPasswordlessSudo, REMOTE_SUDO_SETUP } from './sudo.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -198,10 +200,11 @@ async function getPublicIp() {
  */
 export async function getProcessTreeStats(rootPid) {
   const info = platformInfo();
-  const [disk, publicIp, systemCpu] = await Promise.all([
+  const [disk, publicIp, systemCpu, sudoOk] = await Promise.all([
     getLocalDiskStats(),
     getPublicIp(),
     getLocalCpuPercent(),
+    hasPasswordlessSudo(),
   ]);
 
   const base = {
@@ -212,6 +215,7 @@ export async function getProcessTreeStats(rootPid) {
     diskUsed: disk.used,
     diskFree: disk.free,
     publicIp,
+    sudoOk,
     processCount: 0,
     processes: [],
   };
@@ -260,15 +264,103 @@ export async function killPidOnHost(pid, { force = false } = {}) {
     return { ok: true, method: 'taskkill', pid: n };
   }
 
+  const sig = force ? 'SIGKILL' : 'SIGTERM';
   try {
-    process.kill(n, force ? 'SIGKILL' : 'SIGTERM');
+    process.kill(n, sig);
+    return { ok: true, method: sig, pid: n };
   } catch (err) {
     const code = err && typeof err === 'object' ? err.code : null;
     if (code === 'ESRCH') throw new Error(`No process with PID ${n}`);
-    if (code === 'EPERM') throw new Error(`Permission denied for PID ${n}`);
-    throw err;
+    if (code !== 'EPERM') throw err;
   }
-  return { ok: true, method: force ? 'SIGKILL' : 'SIGTERM', pid: n };
+
+  // Other user's process — try passwordless sudo.
+  if (!(await hasPasswordlessSudo())) {
+    throw new Error(
+      `Permission denied for PID ${n} (enable passwordless sudo to kill root/system processes)`
+    );
+  }
+  try {
+    await execFileAsync(
+      'sudo',
+      ['-n', 'kill', `-${force ? '9' : 'TERM'}`, String(n)],
+      { timeout: 5000 }
+    );
+    return {
+      ok: true,
+      method: force ? 'sudo-SIGKILL' : 'sudo-SIGTERM',
+      pid: n,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/No such process|ESRCH|No process/i.test(msg)) {
+      throw new Error(`No process with PID ${n}`);
+    }
+    throw new Error(`sudo kill failed for PID ${n}: ${msg.split('\n')[0]}`);
+  }
+}
+
+/**
+ * Kill every process listening on a local TCP port.
+ */
+export async function killPortOnHost(port, { force = false } = {}) {
+  const n = Number(port);
+  if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+    throw new Error('Invalid port');
+  }
+
+  let pids = await pidsForLocalPort(n);
+
+  // Root-owned listeners often need sudo lsof to discover PIDs.
+  if (!pids.length && (await hasPasswordlessSudo())) {
+    try {
+      const { stdout } = await execFileAsync(
+        'sudo',
+        ['-n', 'lsof', '-nP', `-iTCP:${n}`, '-sTCP:LISTEN', '-t'],
+        { timeout: 5000 }
+      );
+      pids = [
+        ...new Set(
+          String(stdout || '')
+            .split(/\s+/)
+            .map((x) => Number(x))
+            .filter((pid) => Number.isInteger(pid) && pid > 0)
+        ),
+      ];
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!pids.length) {
+    throw new Error(`No process listening on port ${n}`);
+  }
+
+  const killed = [];
+  const errors = [];
+  for (const pid of pids) {
+    try {
+      const result = await killPidOnHost(pid, { force });
+      killed.push(result.pid);
+    } catch (err) {
+      errors.push(
+        `${pid}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  if (!killed.length) {
+    throw new Error(errors.join('; ') || `Failed to kill port ${n}`);
+  }
+
+  return {
+    ok: true,
+    method: force ? 'port-SIGKILL' : 'port-SIGTERM',
+    port: n,
+    pids: killed,
+    pid: killed[0],
+    error: errors.length ? errors.join('; ') : null,
+  };
 }
 
 export function killCommandForPty(pid, { force = false, remoteOs = 'unix' } = {}) {
@@ -279,12 +371,145 @@ export function killCommandForPty(pid, { force = false, remoteOs = 'unix' } = {}
   if (remoteOs === 'win32' || remoteOs === 'windows') {
     return `taskkill /PID ${n} /T${force ? ' /F' : ''}\r\n`;
   }
-  return `kill -${force ? '9' : 'TERM'} ${n}\n`;
+  const sig = force ? '9' : 'TERM';
+  // Prefer passwordless sudo when available so root-owned PIDs can be killed.
+  return (
+    `if sudo -n true 2>/dev/null; then sudo -n kill -${sig} ${n}; ` +
+    `else kill -${sig} ${n}; fi\n`
+  );
 }
 
-/** Compact remote probe: OS, CPU sample, disk, public IP */
+/** Shell one-liner to kill listeners on a remote TCP port. */
+export function killPortCommandForPty(
+  port,
+  { force = false, remoteOs = 'unix' } = {}
+) {
+  const n = Number(port);
+  if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+    throw new Error('Invalid port');
+  }
+  if (remoteOs === 'win32' || remoteOs === 'windows') {
+    return (
+      `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${n} ^| findstr LISTENING')` +
+      ` do taskkill /PID %a /T${force ? ' /F' : ''}\r\n`
+    );
+  }
+  const sig = force ? 'KILL' : 'TERM';
+  return (
+    `SUDO=""; if sudo -n true 2>/dev/null; then SUDO="sudo -n"; fi; ` +
+    `PIDS=$($SUDO lsof -tiTCP:${n} -sTCP:LISTEN 2>/dev/null || ` +
+    `$SUDO fuser ${n}/tcp 2>/dev/null | tr -s ' ' '\\n'); ` +
+    `if [ -n "$PIDS" ]; then $SUDO kill -${sig} $PIDS; else echo "No listener on ${n}"; fi\n`
+  );
+}
+
+/**
+ * Kill a PID on a remote host via SSH (uses passwordless sudo when available).
+ */
+export async function killPidOnRemote(alias, pid, { force = false } = {}) {
+  const host = String(alias || '').trim();
+  const n = Number(pid);
+  if (!host || /[\s;|&$`<>]/.test(host)) throw new Error('Invalid SSH host');
+  if (!Number.isInteger(n) || n <= 0) throw new Error('Invalid PID');
+
+  const sig = force ? '9' : 'TERM';
+  const script =
+    `${REMOTE_SUDO_SETUP}` +
+    `if [ -n "$SUDO" ]; then $SUDO kill -${sig} ${n}; else kill -${sig} ${n}; fi`;
+
+  try {
+    await execFileAsync(
+      'ssh',
+      [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=6',
+        host,
+        'sh',
+        '-c',
+        script,
+      ],
+      { timeout: 10000, env: process.env }
+    );
+    return {
+      ok: true,
+      method: force ? 'ssh-sudo-SIGKILL' : 'ssh-sudo-SIGTERM',
+      pid: n,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Remote kill failed: ${msg.split('\n')[0]}`);
+  }
+}
+
+/**
+ * Kill listeners on a remote TCP port via SSH (+ sudo -n when available).
+ */
+export async function killPortOnRemote(alias, port, { force = false } = {}) {
+  const host = String(alias || '').trim();
+  const n = Number(port);
+  if (!host || /[\s;|&$`<>]/.test(host)) throw new Error('Invalid SSH host');
+  if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+    throw new Error('Invalid port');
+  }
+
+  const sig = force ? 'KILL' : 'TERM';
+  const script =
+    `${REMOTE_SUDO_SETUP}` +
+    `PIDS=$($SUDO lsof -tiTCP:${n} -sTCP:LISTEN 2>/dev/null || ` +
+    `$SUDO fuser ${n}/tcp 2>/dev/null | tr -s ' ' '\\n' || true); ` +
+    `if [ -z "$PIDS" ]; then echo "NO_LISTENER"; exit 2; fi; ` +
+    `$SUDO kill -${sig} $PIDS; echo "KILLED:$PIDS"`;
+
+  try {
+    const { stdout } = await execFileAsync(
+      'ssh',
+      [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=6',
+        host,
+        'sh',
+        '-c',
+        script,
+      ],
+      { timeout: 12000, env: process.env }
+    );
+    const text = String(stdout || '');
+    if (/NO_LISTENER/.test(text)) {
+      throw new Error(`No process listening on port ${n}`);
+    }
+    const m = text.match(/KILLED:([^\r\n]+)/);
+    const pids = m
+      ? m[1]
+          .trim()
+          .split(/\s+/)
+          .map(Number)
+          .filter((p) => Number.isInteger(p) && p > 0)
+      : [];
+    return {
+      ok: true,
+      method: force ? 'ssh-port-SIGKILL' : 'ssh-port-SIGTERM',
+      port: n,
+      pids,
+      pid: pids[0],
+    };
+  } catch (err) {
+    if (err && typeof err === 'object' && 'message' in err) {
+      const msg = String(err.message);
+      if (/No process listening/.test(msg)) throw err;
+      throw new Error(`Remote port kill failed: ${msg.split('\n')[0]}`);
+    }
+    throw err;
+  }
+}
+
+/** Compact remote probe: OS, CPU sample, disk, public IP, memory */
 const REMOTE_SCRIPT = `
 set +e
+${REMOTE_SUDO_SETUP}
 os_name=\`uname -s 2>/dev/null || echo unknown\`
 os_rel=\`uname -r 2>/dev/null || echo\`
 os_arch=\`uname -m 2>/dev/null || echo\`
@@ -294,9 +519,13 @@ cpu_pct=0
 disk_total=0
 disk_used=0
 disk_free=0
+ram_total=0
+ram_free=0
 public_ip=
+sudo_ok=0
+if [ -n "$SUDO" ]; then sudo_ok=1; fi
 
-# CPU: sample /proc/stat when available
+# CPU: sample /proc/stat when available (readable without root)
 if [ -r /proc/stat ]; then
   read1=\`awk '/^cpu / {print \$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9+\$10+\$11; print \$5+\$6}' /proc/stat\`
   t1=\`echo "\$read1" | sed -n '1p'\`
@@ -311,20 +540,32 @@ if [ -r /proc/stat ]; then
     cpu_pct=\`awk -v dt="\$dt" -v di="\$di" 'BEGIN { printf "%.1f", (1 - di/dt) * 100 }'\`
   fi
 elif command -v top >/dev/null 2>&1; then
-  # BusyBox / generic top fallback
-  cpu_pct=\`top -bn1 2>/dev/null | awk -F'[, ]+' '/Cpu/ { for(i=1;i<=NF;i++) if(\$i ~ /id/) { gsub(/[^0-9.]/,"",\$(i-1)); print 100-\$(i-1); exit } }'\`
+  cpu_pct=\`$SUDO top -bn1 2>/dev/null | awk -F'[, ]+' '/Cpu/ { for(i=1;i<=NF;i++) if(\$i ~ /id/) { gsub(/[^0-9.]/,"",\$(i-1)); print 100-\$(i-1); exit } }'\`
 fi
 if [ -z "\$cpu_pct" ]; then cpu_pct=0; fi
 
-# Disk for root filesystem
+# Disk for root filesystem (sudo helps on restricted mounts)
 if command -v df >/dev/null 2>&1; then
-  # Prefer POSIX df -k
-  df_line=\`df -kP / 2>/dev/null | tail -1\`
+  df_line=\`$SUDO df -kP / 2>/dev/null | tail -1\`
+  if [ -z "\$df_line" ]; then
+    df_line=\`df -kP / 2>/dev/null | tail -1\`
+  fi
   if [ -n "\$df_line" ]; then
     disk_total=\`echo "\$df_line" | awk '{print \$2 * 1024}'\`
     disk_used=\`echo "\$df_line" | awk '{print \$3 * 1024}'\`
     disk_free=\`echo "\$df_line" | awk '{print \$4 * 1024}'\`
   fi
+fi
+
+# Memory
+if [ -r /proc/meminfo ]; then
+  ram_total=\`awk '/^MemTotal:/ {print \$2 * 1024}' /proc/meminfo\`
+  ram_free=\`awk '/^MemAvailable:/ {print \$2 * 1024}' /proc/meminfo\`
+  if [ -z "\$ram_free" ] || [ "\$ram_free" = "0" ]; then
+    ram_free=\`awk '/^MemFree:/ {print \$2 * 1024}' /proc/meminfo\`
+  fi
+elif command -v sysctl >/dev/null 2>&1; then
+  ram_total=\`sysctl -n hw.memsize 2>/dev/null || echo 0\`
 fi
 
 # Public IP (best-effort, short timeouts)
@@ -349,7 +590,10 @@ printf 'NCPU=%s\\n' "\$ncpu"
 printf 'DISK_TOTAL=%s\\n' "\$disk_total"
 printf 'DISK_USED=%s\\n' "\$disk_used"
 printf 'DISK_FREE=%s\\n' "\$disk_free"
+printf 'RAM_TOTAL=%s\\n' "\$ram_total"
+printf 'RAM_FREE=%s\\n' "\$ram_free"
 printf 'PUBLIC_IP=%s\\n' "\$public_ip"
+printf 'SUDO_OK=%s\\n' "\$sudo_ok"
 `;
 
 /** @type {Map<string, { at: number, value: any }>} */
@@ -456,8 +700,11 @@ export async function getRemoteSshStats(alias) {
       diskTotal: Number(fields.DISK_TOTAL) || 0,
       diskUsed: Number(fields.DISK_USED) || 0,
       diskFree: Number(fields.DISK_FREE) || 0,
+      ramTotal: Number(fields.RAM_TOTAL) || 0,
+      ramFree: Number(fields.RAM_FREE) || 0,
       publicIp: fields.PUBLIC_IP || '',
       cpus: Number(fields.NCPU) || 0,
+      sudoOk: fields.SUDO_OK === '1',
       processCount: 0,
       processes: [],
     };

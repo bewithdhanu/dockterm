@@ -20,7 +20,11 @@ import {
   getProcessTreeStats,
   getRemoteSshStats,
   killPidOnHost,
+  killPortOnHost,
+  killPidOnRemote,
+  killPortOnRemote,
   killCommandForPty,
+  killPortCommandForPty,
   platformInfo,
 } from './sessionStats.js';
 import { pickIdentityFileNative } from './pickFile.js';
@@ -31,6 +35,8 @@ import {
   escapeShellArg,
   listHostProcesses,
   listRemoteProcesses,
+  listHostPorts,
+  listRemotePorts,
   resolveExistingCwd,
 } from './processInfo.js';
 
@@ -628,8 +634,20 @@ wss.on('connection', (ws) => {
             : listHostProcesses()
           : Promise.resolve(null);
 
-        Promise.all([loadStats, loadCwd, loadProcs])
-          .then(([proc, cwd, processes]) => {
+        const loadPorts = wantProcs
+          ? term.__kind === 'ssh' && term.__sshHost
+            ? listRemotePorts(term.__sshHost)
+            : listHostPorts()
+          : Promise.resolve(null);
+
+        Promise.all([loadStats, loadCwd, loadProcs, loadPorts])
+          .then(([proc, cwd, processes, portInfo]) => {
+            const ports = Array.isArray(portInfo)
+              ? portInfo
+              : portInfo?.ports || [];
+            const portsNote = Array.isArray(portInfo)
+              ? null
+              : portInfo?.portsNote || null;
             send({
               ...base,
               cwd,
@@ -642,12 +660,15 @@ wss.on('connection', (ws) => {
               diskTotal: proc.diskTotal,
               diskUsed: proc.diskUsed,
               diskFree: proc.diskFree,
-              publicIp: proc.publicIp || '',
-              memoryUsed: proc.memoryUsed,
               ramTotal: proc.ramTotal,
               ramFree: proc.ramFree,
+              publicIp: proc.publicIp || '',
+              memoryUsed: proc.memoryUsed,
+              sudoOk: Boolean(proc.sudoOk),
               processCount: proc.processCount,
               processes: processes || proc.processes || [],
+              ports,
+              portsNote,
               error: proc.error || null,
             });
           })
@@ -662,42 +683,83 @@ wss.on('connection', (ws) => {
 
       case 'kill': {
         const id = msg.id;
-        const pid = Number(msg.pid);
         const force = Boolean(msg.force);
         const term = tabs.get(id) || sessions.get(id);
+        const port = Number(msg.port);
+        const pid = Number(msg.pid);
+        const killByPort =
+          Number.isInteger(port) && port > 0 && port <= 65535;
 
-        if (!Number.isInteger(pid) || pid <= 0) {
-          send({ type: 'kill-result', id, ok: false, error: 'Invalid PID' });
+        if (!killByPort && (!Number.isInteger(pid) || pid <= 0)) {
+          send({
+            type: 'kill-result',
+            id,
+            ok: false,
+            error: 'Enter a valid PID or port',
+          });
           break;
         }
 
         (async () => {
           try {
-            // SSH sessions: send OS-appropriate kill into the remote shell.
-            if (term && term.__kind === 'ssh') {
-              const cmd = killCommandForPty(pid, {
-                force,
-                remoteOs: msg.remoteOs || 'unix',
-              });
+            if (term && term.__kind === 'ssh' && term.__sshHost) {
+              const remoteOs = msg.remoteOs || 'unix';
+              // Prefer out-of-band SSH + passwordless sudo (no PTY spam).
+              if (remoteOs !== 'win32' && remoteOs !== 'windows') {
+                try {
+                  const result = killByPort
+                    ? await killPortOnRemote(term.__sshHost, port, { force })
+                    : await killPidOnRemote(term.__sshHost, pid, { force });
+                  send({ type: 'kill-result', id, ...result });
+                  return;
+                } catch (sshErr) {
+                  // Fall through to PTY kill (also tries sudo -n in the shell).
+                  const cmd = killByPort
+                    ? killPortCommandForPty(port, { force, remoteOs })
+                    : killCommandForPty(pid, { force, remoteOs });
+                  term.write(cmd);
+                  send({
+                    type: 'kill-result',
+                    id,
+                    ok: true,
+                    method: 'pty-fallback',
+                    pid: killByPort ? undefined : pid,
+                    port: killByPort ? port : undefined,
+                    error:
+                      sshErr instanceof Error
+                        ? `SSH kill failed, tried via shell: ${sshErr.message}`
+                        : null,
+                  });
+                  return;
+                }
+              }
+
+              const cmd = killByPort
+                ? killPortCommandForPty(port, { force, remoteOs })
+                : killCommandForPty(pid, { force, remoteOs });
               term.write(cmd);
               send({
                 type: 'kill-result',
                 id,
                 ok: true,
                 method: 'pty',
-                pid,
+                pid: killByPort ? undefined : pid,
+                port: killByPort ? port : undefined,
               });
               return;
             }
 
-            const result = await killPidOnHost(pid, { force });
+            const result = killByPort
+              ? await killPortOnHost(port, { force })
+              : await killPidOnHost(pid, { force });
             send({ type: 'kill-result', id, ...result });
           } catch (err) {
             send({
               type: 'kill-result',
               id,
               ok: false,
-              pid,
+              pid: killByPort ? undefined : pid,
+              port: killByPort ? port : undefined,
               error: err instanceof Error ? err.message : String(err),
             });
           }

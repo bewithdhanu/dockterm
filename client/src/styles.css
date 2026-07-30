@@ -1892,19 +1892,94 @@ body,
   border-top: 1px solid color-mix(in srgb, var(--term-border, #2b2b2b) 55%, transparent);
 }
 
+.term-pkill-modes {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 2px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--term-bg, #1e1e1e) 90%, var(--term-fg, #fff) 6%);
+}
+
+.term-pkill-mode {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--term-muted, #888);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.term-pkill-mode.active {
+  background: color-mix(in srgb, var(--term-accent, #007acc) 28%, transparent);
+  color: var(--term-fg, #eee);
+}
+
+.term-pkill-hint {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  color: var(--term-muted, #777);
+  line-height: 1.35;
+}
+
 .term-procs-panel {
   border-top: 1px solid color-mix(in srgb, var(--term-border, #2b2b2b) 55%, transparent);
-  max-height: 220px;
+  max-height: min(52vh, 420px);
   display: flex;
   flex-direction: column;
+  gap: 10px;
   min-height: 0;
+  overflow: auto;
+}
+
+.term-procs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.term-procs-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.term-procs-title {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--term-fg, #ddd);
+  letter-spacing: 0.01em;
+}
+
+.term-procs-count {
+  font-weight: 500;
+  color: var(--term-muted, #888);
+}
+
+.term-ports-note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--term-yellow, #eab308);
+  opacity: 0.9;
 }
 
 .term-procs-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 6px;
+}
+
+.term-procs-search-icon {
+  color: var(--term-muted, #777);
+  flex-shrink: 0;
 }
 
 .term-procs-search {
@@ -1926,6 +2001,17 @@ body,
 
 .term-procs-search::placeholder {
   color: var(--term-muted, #777);
+}
+
+.term-procs-force {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.term-procs-msg {
+  margin: 0;
+  font-size: 11px;
+  color: var(--term-cyan, #9cdcfe);
 }
 
 .term-th-btn {
@@ -1956,7 +2042,8 @@ body,
 
 .term-procs-table-wrap {
   overflow: auto;
-  min-height: 0;
+  min-height: 72px;
+  max-height: 160px;
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--term-border, #2b2b2b) 55%, transparent);
   border-radius: 4px;
@@ -2009,11 +2096,15 @@ body,
   background: transparent;
   color: var(--term-muted, #888);
   cursor: pointer;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   font-size: 13px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .term-proc-kill:hover {

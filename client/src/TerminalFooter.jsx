@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LuSearch, LuX } from 'react-icons/lu';
+
+const TOP_PROCS = 25;
 
 function formatRate(bytesPerSec) {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec < 0) return '0 B/s';
@@ -24,6 +27,23 @@ function formatBytes(bytes) {
   return `${n < 10 && i > 0 ? n.toFixed(1) : n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function SortTh({ label, active, dir, onClick }) {
+  return (
+    <th>
+      <button
+        type="button"
+        className={`term-th-btn ${active ? 'active' : ''}`}
+        onClick={onClick}
+      >
+        {label}
+        <span className="term-th-arrow">
+          {active ? (dir === 'asc' ? '↑' : '↓') : ''}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 /**
  * Footer under each terminal: status, I/O rates, stats / pkill / processes.
  */
@@ -41,10 +61,16 @@ export function TerminalFooter({
   const [procsOpen, setProcsOpen] = useState(false);
   const [stats, setStats] = useState(null);
   const [procs, setProcs] = useState([]);
-  const [procSort, setProcSort] = useState('cpu'); // name | cpu | mem | etime | pid
+  const [ports, setPorts] = useState([]);
+  const [portsNote, setPortsNote] = useState(null);
+  const [procSort, setProcSort] = useState('cpu');
   const [procSortDir, setProcSortDir] = useState('desc');
+  const [portSort, setPortSort] = useState('port');
+  const [portSortDir, setPortSortDir] = useState('asc');
   const [procQuery, setProcQuery] = useState('');
-  const [killPid, setKillPid] = useState('');
+  const [portQuery, setPortQuery] = useState('');
+  const [killMode, setKillMode] = useState('pid'); // pid | port
+  const [killTarget, setKillTarget] = useState('');
   const [killForce, setKillForce] = useState(false);
   const [remoteOs, setRemoteOs] = useState('unix');
   const [killMsg, setKillMsg] = useState(null);
@@ -53,28 +79,32 @@ export function TerminalFooter({
 
   const connecting = sshStatus === 'connecting' && alive !== false;
   const sessionDown =
-    !connected ||
-    alive === false ||
-    sshStatus === 'error';
+    !connected || alive === false || sshStatus === 'error';
   const toolsReady = !sessionDown && !connecting;
 
   useEffect(() => {
     const unregister = registerStatsHandlers(id, {
       onStats: (msg) => {
         setStats(msg);
-        if (Array.isArray(msg.processes) && msg.processes.length) {
-          setProcs(msg.processes);
-        }
+        if (Array.isArray(msg.processes)) setProcs(msg.processes);
+        if (Array.isArray(msg.ports)) setPorts(msg.ports);
+        setPortsNote(msg.portsNote || null);
         if (msg?.kind === 'ssh' && msg.platform) {
           setRemoteOs(msg.platform === 'win32' ? 'win32' : 'unix');
         }
       },
       onKillResult: (msg) => {
-        setKillMsg(
-          msg.ok
-            ? `Killed PID ${msg.pid} (${msg.method})`
-            : msg.error || 'Kill failed'
-        );
+        if (msg.ok) {
+          const who =
+            msg.port != null
+              ? `port ${msg.port}${
+                  msg.pids?.length ? ` (PIDs ${msg.pids.join(', ')})` : ''
+                }`
+              : `PID ${msg.pid}`;
+          setKillMsg(`Killed ${who} (${msg.method})`);
+        } else {
+          setKillMsg(msg.error || 'Kill failed');
+        }
       },
     });
     return unregister;
@@ -113,11 +143,12 @@ export function TerminalFooter({
           ? `SSH · ${sshHost || stats.sshHost || 'remote'}`
           : 'Connected';
 
-  const statusState = sessionDown || stats?.alive === false
-    ? 'down'
-    : connecting
-      ? 'connecting'
-      : 'ok';
+  const statusState =
+    sessionDown || stats?.alive === false
+      ? 'down'
+      : connecting
+        ? 'connecting'
+        : 'ok';
   const inRate = stats?.inRate ?? 0;
   const outRate = stats?.outRate ?? 0;
   const panelOpen = toolsReady && (statsOpen || pkillOpen || procsOpen);
@@ -133,15 +164,11 @@ export function TerminalFooter({
         });
     const dir = procSortDir === 'asc' ? 1 : -1;
     list.sort((a, b) => {
-      if (procSort === 'pid') {
-        return dir * ((a.pid || 0) - (b.pid || 0));
-      }
+      if (procSort === 'pid') return dir * ((a.pid || 0) - (b.pid || 0));
       if (procSort === 'name') {
         return dir * String(a.name || '').localeCompare(String(b.name || ''));
       }
-      if (procSort === 'cpu') {
-        return dir * ((a.cpu || 0) - (b.cpu || 0));
-      }
+      if (procSort === 'cpu') return dir * ((a.cpu || 0) - (b.cpu || 0));
       if (procSort === 'mem') {
         return dir * ((a.mem || a.rss || 0) - (b.mem || b.rss || 0));
       }
@@ -150,10 +177,40 @@ export function TerminalFooter({
       }
       return 0;
     });
+    // Without search: top 25 heaviest under current sort.
+    if (!q) list = list.slice(0, TOP_PROCS);
     return list;
   }, [procs, procSort, procSortDir, procQuery]);
 
-  const toggleSort = (key) => {
+  const sortedPorts = useMemo(() => {
+    const q = portQuery.trim().toLowerCase();
+    let list = !q
+      ? [...ports]
+      : ports.filter((p) => {
+          const hay = `${p.port} ${p.name || ''} ${p.pid || ''} ${p.address || ''} ${p.proto || ''}`.toLowerCase();
+          return hay.includes(q);
+        });
+    const dir = portSortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      if (portSort === 'port') return dir * ((a.port || 0) - (b.port || 0));
+      if (portSort === 'pid') return dir * ((a.pid || 0) - (b.pid || 0));
+      if (portSort === 'name') {
+        return dir * String(a.name || '').localeCompare(String(b.name || ''));
+      }
+      if (portSort === 'proto') {
+        return dir * String(a.proto || '').localeCompare(String(b.proto || ''));
+      }
+      if (portSort === 'address') {
+        return (
+          dir * String(a.address || '').localeCompare(String(b.address || ''))
+        );
+      }
+      return 0;
+    });
+    return list;
+  }, [ports, portSort, portSortDir, portQuery]);
+
+  const toggleProcSort = (key) => {
     if (procSort === key) {
       setProcSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -162,32 +219,53 @@ export function TerminalFooter({
     }
   };
 
-  const onKill = (e) => {
-    e.preventDefault();
-    setKillMsg(null);
-    const pid = Number(String(killPid).trim());
-    if (!Number.isInteger(pid) || pid <= 0) {
-      setKillMsg('Enter a valid PID');
-      return;
+  const togglePortSort = (key) => {
+    if (portSort === key) {
+      setPortSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setPortSort(key);
+      setPortSortDir('asc');
     }
+  };
+
+  const remoteOsArg = stats?.kind === 'ssh' ? remoteOs : undefined;
+
+  const sendKill = ({ pid, port }) => {
+    setKillMsg(null);
     send({
       type: 'kill',
       id,
       pid,
+      port,
       force: killForce,
-      remoteOs: stats?.kind === 'ssh' ? remoteOs : undefined,
+      remoteOs: remoteOsArg,
     });
   };
 
-  const killRow = (pid) => {
+  const onKill = (e) => {
+    e.preventDefault();
     setKillMsg(null);
-    send({
-      type: 'kill',
-      id,
-      pid,
-      force: killForce,
-      remoteOs: stats?.kind === 'ssh' ? remoteOs : undefined,
-    });
+    const raw = String(killTarget).trim();
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+      setKillMsg(killMode === 'port' ? 'Enter a valid port' : 'Enter a valid PID');
+      return;
+    }
+    if (killMode === 'port') {
+      if (n > 65535) {
+        setKillMsg('Port must be 1–65535');
+        return;
+      }
+      sendKill({ port: n });
+      return;
+    }
+    sendKill({ pid: n });
+  };
+
+  const openPanel = (which) => {
+    setStatsOpen(which === 'stats' ? (v) => !v : false);
+    setPkillOpen(which === 'pkill' ? (v) => !v : false);
+    setProcsOpen(which === 'procs' ? (v) => !v : false);
   };
 
   return (
@@ -213,23 +291,23 @@ export function TerminalFooter({
               <button
                 type="button"
                 className={`term-footer-stats-btn ${procsOpen ? 'active' : ''}`}
-                onClick={() => setProcsOpen((v) => !v)}
-                title="Process list"
+                onClick={() => openPanel('procs')}
+                title="Top processes & listening ports"
               >
                 Procs
               </button>
               <button
                 type="button"
                 className={`term-footer-stats-btn ${pkillOpen ? 'active' : ''}`}
-                onClick={() => setPkillOpen((v) => !v)}
-                title="Kill process by PID"
+                onClick={() => openPanel('pkill')}
+                title="Kill by PID or port"
               >
                 pkill
               </button>
               <button
                 type="button"
                 className={`term-footer-stats-btn ${statsOpen ? 'active' : ''}`}
-                onClick={() => setStatsOpen((v) => !v)}
+                onClick={() => openPanel('stats')}
                 title="Session stats"
               >
                 Stats
@@ -266,10 +344,16 @@ export function TerminalFooter({
               </span>
             </div>
             <div className="term-stat">
-              <span className="term-stat-label">Public IP</span>
+              <span className="term-stat-label">RAM</span>
               <span className="term-stat-value">
-                {stats?.publicIp || '—'}
+                {stats?.ramTotal
+                  ? `${formatBytes((stats.ramTotal || 0) - (stats.ramFree || 0))} / ${formatBytes(stats.ramTotal)}`
+                  : '—'}
               </span>
+            </div>
+            <div className="term-stat">
+              <span className="term-stat-label">Public IP</span>
+              <span className="term-stat-value">{stats?.publicIp || '—'}</span>
             </div>
             <div className="term-stat">
               <span className="term-stat-label">
@@ -291,177 +375,290 @@ export function TerminalFooter({
                   : stats?.pid ?? '—'}
               </span>
             </div>
+            {stats?.kind === 'ssh' || stats?.sudoOk != null ? (
+              <div className="term-stat">
+                <span className="term-stat-label">sudo -n</span>
+                <span className="term-stat-value">
+                  {stats?.sudoOk ? 'available' : 'not available'}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {stats?.kind === 'ssh' && !stats?.error && (
             <p className="term-stats-note">
               Stats are from the remote host via SSH alias
-              {stats?.sshHost ? ` “${stats.sshHost}”` : ''}.
+              {stats?.sshHost ? ` “${stats.sshHost}”` : ''}
+              {stats?.sudoOk ? ' · using passwordless sudo when needed' : ''}.
             </p>
           )}
 
-          {stats?.error && (
-            <p className="term-stats-error">{stats.error}</p>
-          )}
+          {stats?.error && <p className="term-stats-error">{stats.error}</p>}
         </div>
       )}
 
       {procsOpen && (
         <div className="term-footer-panel term-procs-panel">
-          <div className="term-procs-toolbar">
-            <input
-              type="search"
-              className="term-procs-search"
-              placeholder={
-                stats?.kind === 'ssh'
-                  ? 'Search remote processes…'
-                  : 'Search processes…'
-              }
-              value={procQuery}
-              onChange={(e) => setProcQuery(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="term-procs-table-wrap">
-            <table className="term-procs-table">
-              <thead>
-                <tr>
-                  <th>
-                    <button
-                      type="button"
-                      className={`term-th-btn ${procSort === 'pid' ? 'active' : ''}`}
-                      onClick={() => toggleSort('pid')}
-                    >
-                      PID
-                      <span className="term-th-arrow">
-                        {procSort === 'pid'
-                          ? procSortDir === 'asc'
-                            ? '↑'
-                            : '↓'
-                          : ''}
-                      </span>
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`term-th-btn ${procSort === 'name' ? 'active' : ''}`}
-                      onClick={() => toggleSort('name')}
-                    >
-                      Name
-                      <span className="term-th-arrow">
-                        {procSort === 'name'
-                          ? procSortDir === 'asc'
-                            ? '↑'
-                            : '↓'
-                          : ''}
-                      </span>
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`term-th-btn ${procSort === 'cpu' ? 'active' : ''}`}
-                      onClick={() => toggleSort('cpu')}
-                    >
-                      CPU%
-                      <span className="term-th-arrow">
-                        {procSort === 'cpu'
-                          ? procSortDir === 'asc'
-                            ? '↑'
-                            : '↓'
-                          : ''}
-                      </span>
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`term-th-btn ${procSort === 'mem' ? 'active' : ''}`}
-                      onClick={() => toggleSort('mem')}
-                    >
-                      Usage
-                      <span className="term-th-arrow">
-                        {procSort === 'mem'
-                          ? procSortDir === 'asc'
-                            ? '↑'
-                            : '↓'
-                          : ''}
-                      </span>
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`term-th-btn ${procSort === 'etime' ? 'active' : ''}`}
-                      onClick={() => toggleSort('etime')}
-                    >
-                      Runtime
-                      <span className="term-th-arrow">
-                        {procSort === 'etime'
-                          ? procSortDir === 'asc'
-                            ? '↑'
-                            : '↓'
-                          : ''}
-                      </span>
-                    </button>
-                  </th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedProcs.length === 0 && (
+          <section className="term-procs-section">
+            <div className="term-procs-section-head">
+              <h3 className="term-procs-title">
+                Top {TOP_PROCS} processes
+                <span className="term-procs-count">
+                  {procs.length
+                    ? ` · ${Math.min(TOP_PROCS, procs.length)} shown`
+                    : ''}
+                </span>
+              </h3>
+              <div className="term-procs-toolbar">
+                <LuSearch size={13} className="term-procs-search-icon" aria-hidden />
+                <input
+                  type="search"
+                  className="term-procs-search"
+                  placeholder={
+                    stats?.kind === 'ssh'
+                      ? 'Search remote processes…'
+                      : 'Search processes…'
+                  }
+                  value={procQuery}
+                  onChange={(e) => setProcQuery(e.target.value)}
+                  autoFocus
+                />
+                <label className="term-kill-force term-procs-force">
+                  <input
+                    type="checkbox"
+                    checked={killForce}
+                    onChange={(e) => setKillForce(e.target.checked)}
+                  />
+                  Force
+                </label>
+              </div>
+            </div>
+            <div className="term-procs-table-wrap">
+              <table className="term-procs-table">
+                <thead>
                   <tr>
-                    <td colSpan={6} className="term-procs-empty">
-                      {procs.length === 0
-                        ? 'Loading processes…'
-                        : 'No matching processes'}
-                    </td>
+                    <SortTh
+                      label="PID"
+                      active={procSort === 'pid'}
+                      dir={procSortDir}
+                      onClick={() => toggleProcSort('pid')}
+                    />
+                    <SortTh
+                      label="Name"
+                      active={procSort === 'name'}
+                      dir={procSortDir}
+                      onClick={() => toggleProcSort('name')}
+                    />
+                    <SortTh
+                      label="CPU%"
+                      active={procSort === 'cpu'}
+                      dir={procSortDir}
+                      onClick={() => toggleProcSort('cpu')}
+                    />
+                    <SortTh
+                      label="Mem"
+                      active={procSort === 'mem'}
+                      dir={procSortDir}
+                      onClick={() => toggleProcSort('mem')}
+                    />
+                    <SortTh
+                      label="Runtime"
+                      active={procSort === 'etime'}
+                      dir={procSortDir}
+                      onClick={() => toggleProcSort('etime')}
+                    />
+                    <th />
                   </tr>
-                )}
-                {sortedProcs.map((p) => (
-                  <tr key={`${p.pid}-${p.name}`}>
-                    <td className="mono">{p.pid}</td>
-                    <td className="name" title={p.name}>
-                      {p.name}
-                    </td>
-                    <td className="mono">{(p.cpu || 0).toFixed(1)}</td>
-                    <td className="mono">
-                      {formatBytes(p.mem || p.rss || 0)}
-                    </td>
-                    <td className="mono">{p.etime || '—'}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="term-proc-kill"
-                        title={`Kill ${p.pid}`}
-                        onClick={() => killRow(p.pid)}
-                      >
-                        ×
-                      </button>
-                    </td>
+                </thead>
+                <tbody>
+                  {sortedProcs.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="term-procs-empty">
+                        {procs.length === 0
+                          ? 'Loading processes…'
+                          : 'No matching processes'}
+                      </td>
+                    </tr>
+                  )}
+                  {sortedProcs.map((p) => (
+                    <tr key={`p-${p.pid}-${p.name}`}>
+                      <td className="mono">{p.pid}</td>
+                      <td className="name" title={p.name}>
+                        {p.name}
+                      </td>
+                      <td className="mono">{(p.cpu || 0).toFixed(1)}</td>
+                      <td className="mono">
+                        {formatBytes(p.mem || p.rss || 0)}
+                      </td>
+                      <td className="mono">{p.etime || '—'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="term-proc-kill"
+                          title={`Kill PID ${p.pid}`}
+                          onClick={() => sendKill({ pid: p.pid })}
+                        >
+                          <LuX size={12} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="term-procs-section">
+            <div className="term-procs-section-head">
+              <h3 className="term-procs-title">
+                Listening ports
+                <span className="term-procs-count">
+                  {ports.length ? ` · ${ports.length}` : ''}
+                </span>
+              </h3>
+              {portsNote ? (
+                <p className="term-ports-note" title={portsNote}>
+                  {portsNote}
+                </p>
+              ) : null}
+              <div className="term-procs-toolbar">
+                <LuSearch size={13} className="term-procs-search-icon" aria-hidden />
+                <input
+                  type="search"
+                  className="term-procs-search"
+                  placeholder="Search ports, process, PID…"
+                  value={portQuery}
+                  onChange={(e) => setPortQuery(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="term-procs-table-wrap">
+              <table className="term-procs-table">
+                <thead>
+                  <tr>
+                    <SortTh
+                      label="Port"
+                      active={portSort === 'port'}
+                      dir={portSortDir}
+                      onClick={() => togglePortSort('port')}
+                    />
+                    <SortTh
+                      label="Proto"
+                      active={portSort === 'proto'}
+                      dir={portSortDir}
+                      onClick={() => togglePortSort('proto')}
+                    />
+                    <SortTh
+                      label="Process"
+                      active={portSort === 'name'}
+                      dir={portSortDir}
+                      onClick={() => togglePortSort('name')}
+                    />
+                    <SortTh
+                      label="PID"
+                      active={portSort === 'pid'}
+                      dir={portSortDir}
+                      onClick={() => togglePortSort('pid')}
+                    />
+                    <SortTh
+                      label="Address"
+                      active={portSort === 'address'}
+                      dir={portSortDir}
+                      onClick={() => togglePortSort('address')}
+                    />
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sortedPorts.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="term-procs-empty">
+                        {ports.length === 0
+                          ? 'Loading ports…'
+                          : 'No matching ports'}
+                      </td>
+                    </tr>
+                  )}
+                  {sortedPorts.map((p) => (
+                    <tr key={`port-${p.port}-${p.pid}-${p.address}`}>
+                      <td className="mono">{p.port}</td>
+                      <td className="mono">{p.proto || 'TCP'}</td>
+                      <td className="name" title={p.name}>
+                        {p.name || '—'}
+                      </td>
+                      <td className="mono">{p.pid || '—'}</td>
+                      <td className="name" title={p.address}>
+                        {p.address || '—'}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="term-proc-kill"
+                          title={
+                            p.pid
+                              ? `Kill PID ${p.pid} (port ${p.port})`
+                              : `Kill listeners on port ${p.port}`
+                          }
+                          onClick={() =>
+                            p.pid
+                              ? sendKill({ pid: p.pid })
+                              : sendKill({ port: p.port })
+                          }
+                        >
+                          <LuX size={12} aria-hidden />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {killMsg && <p className="term-procs-msg">{killMsg}</p>}
         </div>
       )}
 
       {pkillOpen && (
         <div className="term-footer-panel term-pkill-panel">
+          <div className="term-pkill-modes" role="tablist" aria-label="Kill by">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={killMode === 'pid'}
+              className={`term-pkill-mode ${killMode === 'pid' ? 'active' : ''}`}
+              onClick={() => {
+                setKillMode('pid');
+                setKillMsg(null);
+              }}
+            >
+              By PID
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={killMode === 'port'}
+              className={`term-pkill-mode ${killMode === 'port' ? 'active' : ''}`}
+              onClick={() => {
+                setKillMode('port');
+                setKillMsg(null);
+              }}
+            >
+              By port
+            </button>
+          </div>
           <form className="term-kill" onSubmit={onKill}>
             <label className="term-kill-label" htmlFor={`kill-${id}`}>
-              PID
+              {killMode === 'port' ? 'Port' : 'PID'}
             </label>
             <input
               id={`kill-${id}`}
               className="term-kill-input"
               type="text"
               inputMode="numeric"
-              placeholder="PID"
-              value={killPid}
-              onChange={(e) => setKillPid(e.target.value)}
+              placeholder={killMode === 'port' ? 'e.g. 3001' : 'e.g. 12345'}
+              value={killTarget}
+              onChange={(e) => setKillTarget(e.target.value)}
               autoFocus
             />
             {stats?.kind === 'ssh' && (
@@ -484,10 +681,15 @@ export function TerminalFooter({
               Force
             </label>
             <button type="submit" className="term-kill-btn">
-              pkill
+              {killMode === 'port' ? 'Kill port' : 'Kill PID'}
             </button>
             {killMsg && <span className="term-kill-msg">{killMsg}</span>}
           </form>
+          <p className="term-pkill-hint">
+            {killMode === 'port'
+              ? 'Terminates every process listening on that TCP port.'
+              : 'Sends SIGTERM (or SIGKILL when Force is on) to the process.'}
+          </p>
         </div>
       )}
     </div>

@@ -632,14 +632,12 @@ export function TerminalPane({
         return false;
       }
 
-      // ⌘V / Ctrl+V / Ctrl+Shift+V → paste
+      // Paste shortcuts: block xterm from treating them as input; the native
+      // `paste` listener below performs a single paste (avoids double-paste).
       if (
         (primary && key === 'v' && !ev.altKey && (mac || !ev.shiftKey)) ||
         (ev.ctrlKey && ev.shiftKey && key === 'v')
       ) {
-        void readClipboard().then((text) => {
-          if (text) term.paste(text);
-        });
         return false;
       }
 
@@ -654,10 +652,17 @@ export function TerminalPane({
       void writeClipboard(text);
     };
     const onPaste = (e) => {
-      const text = e.clipboardData?.getData('text/plain');
-      if (!text) return;
       e.preventDefault();
-      term.paste(text);
+      e.stopPropagation();
+      const fromEvent = e.clipboardData?.getData('text/plain');
+      if (fromEvent) {
+        term.paste(fromEvent);
+        return;
+      }
+      // Electron / restricted clipboard: fall back to async read once.
+      void readClipboard().then((text) => {
+        if (text) term.paste(text);
+      });
     };
     el.addEventListener('copy', onCopy);
     el.addEventListener('paste', onPaste);
