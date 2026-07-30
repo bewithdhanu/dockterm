@@ -1,6 +1,4 @@
 const THEME_KEY = 'dockterm.term-theme';
-const FONT_KEY = 'dockterm.term-font';
-const FONT_SIZE_KEY = 'dockterm.term-font-size';
 export const TERM_THEME_EVENT = 'dockterm-term-theme';
 
 /** @typedef {{
@@ -10,63 +8,11 @@ export const TERM_THEME_EVENT = 'dockterm-term-theme';
  * }} TermThemeDef
  */
 
-/** @typedef {{
- *  id: string,
- *  label: string,
- *  value: string
- * }} TermFontDef
- */
+/** System monospace stack for the terminal. */
+export const TERM_FONT_FAMILY =
+  '"SF Mono", Menlo, Monaco, ui-monospace, monospace';
 
-export const TERM_FONTS = [
-  {
-    id: 'default',
-    label: 'Meslo / SF Mono',
-    value:
-      '"MesloLGS NF", "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace',
-  },
-  {
-    id: 'sf-mono',
-    label: 'SF Mono',
-    value: '"SF Mono", Menlo, Monaco, monospace',
-  },
-  {
-    id: 'menlo',
-    label: 'Menlo',
-    value: 'Menlo, Monaco, monospace',
-  },
-  {
-    id: 'ibm-plex',
-    label: 'IBM Plex Mono',
-    value: '"IBM Plex Mono", Menlo, Monaco, monospace',
-  },
-  {
-    id: 'jetbrains',
-    label: 'JetBrains Mono',
-    value: '"JetBrains Mono", Menlo, Monaco, monospace',
-  },
-  {
-    id: 'fira',
-    label: 'Fira Code',
-    value: '"Fira Code", Menlo, Monaco, monospace',
-  },
-  {
-    id: 'source-code',
-    label: 'Source Code Pro',
-    value: '"Source Code Pro", Menlo, Monaco, monospace',
-  },
-  {
-    id: 'cascadia',
-    label: 'Cascadia Mono',
-    value: '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
-  },
-  {
-    id: 'system',
-    label: 'System Mono',
-    value:
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-  },
-];
-
+const FONT_SIZE_KEY = 'dockterm.term-font-size';
 export const TERM_FONT_SIZE_MIN = 11;
 export const TERM_FONT_SIZE_MAX = 24;
 export const DEFAULT_TERM_FONT_SIZE = 14;
@@ -263,6 +209,34 @@ export const TERMINAL_THEMES = [
       brightWhite: '#e5e5e5',
     },
   },
+  {
+    id: 'light',
+    label: 'Light',
+    theme: {
+      background: '#f7f8fa',
+      foreground: '#1f2328',
+      cursor: '#0969da',
+      cursorAccent: '#ffffff',
+      selectionBackground: 'rgba(9, 105, 218, 0.28)',
+      selectionForeground: '#1f2328',
+      black: '#24292f',
+      red: '#cf222e',
+      green: '#1a7f37',
+      yellow: '#9a6700',
+      blue: '#0969da',
+      magenta: '#8250df',
+      cyan: '#1b7c83',
+      white: '#6e7781',
+      brightBlack: '#656d76',
+      brightRed: '#a40e26',
+      brightGreen: '#116329',
+      brightYellow: '#7d4e00',
+      brightBlue: '#0550ae',
+      brightMagenta: '#6639ba',
+      brightCyan: '#136f75',
+      brightWhite: '#0d1117',
+    },
+  },
 ];
 
 export function getTermThemeId() {
@@ -281,20 +255,6 @@ export function getTermTheme(id = getTermThemeId()) {
   ).theme;
 }
 
-export function getTermFontId() {
-  try {
-    const id = localStorage.getItem(FONT_KEY);
-    if (id && TERM_FONTS.some((f) => f.id === id)) return id;
-  } catch {
-    /* ignore */
-  }
-  return 'default';
-}
-
-export function getTermFontFamily(id = getTermFontId()) {
-  return (TERM_FONTS.find((f) => f.id === id) || TERM_FONTS[0]).value;
-}
-
 export function getTermFontSize() {
   try {
     const n = Number(localStorage.getItem(FONT_SIZE_KEY));
@@ -311,12 +271,26 @@ export function getTermFontSize() {
   return DEFAULT_TERM_FONT_SIZE;
 }
 
+export function setTermFontSize(size) {
+  const n = Math.round(Number(size));
+  const next =
+    Number.isFinite(n) && n >= TERM_FONT_SIZE_MIN && n <= TERM_FONT_SIZE_MAX
+      ? n
+      : DEFAULT_TERM_FONT_SIZE;
+  try {
+    localStorage.setItem(FONT_SIZE_KEY, String(next));
+  } catch {
+    /* ignore */
+  }
+  dispatchAppearance({ fontSize: next });
+  return next;
+}
+
 function appearanceDetail(overrides = {}) {
   return {
     id: getTermThemeId(),
     theme: getTermTheme(),
-    fontId: getTermFontId(),
-    fontFamily: getTermFontFamily(),
+    fontFamily: TERM_FONT_FAMILY,
     fontSize: getTermFontSize(),
     ...overrides,
   };
@@ -338,35 +312,6 @@ export function setTermThemeId(id) {
   const theme = getTermTheme(next);
   applyTermThemeCssVars(theme);
   dispatchAppearance({ id: next, theme });
-  return next;
-}
-
-export function setTermFontId(id) {
-  const next = TERM_FONTS.some((f) => f.id === id) ? id : 'default';
-  try {
-    localStorage.setItem(FONT_KEY, next);
-  } catch {
-    /* ignore */
-  }
-  dispatchAppearance({
-    fontId: next,
-    fontFamily: getTermFontFamily(next),
-  });
-  return next;
-}
-
-export function setTermFontSize(size) {
-  const n = Math.round(Number(size));
-  const next =
-    Number.isFinite(n) && n >= TERM_FONT_SIZE_MIN && n <= TERM_FONT_SIZE_MAX
-      ? n
-      : DEFAULT_TERM_FONT_SIZE;
-  try {
-    localStorage.setItem(FONT_SIZE_KEY, String(next));
-  } catch {
-    /* ignore */
-  }
-  dispatchAppearance({ fontSize: next });
   return next;
 }
 
@@ -399,6 +344,133 @@ export function applyTermThemeCssVars(theme = getTermTheme()) {
   }
 }
 
+/** DockTerm chrome defaults (hosts / non-session views). */
+export const APP_CHROME_DEFAULTS = {
+  '--bg': '#1a1c23',
+  '--bg-elevated': '#20232c',
+  '--panel': '#242832',
+  '--panel-2': '#2a2e38',
+  '--border': '#323644',
+  '--text': '#e8eaef',
+  '--muted': '#b4bac8',
+  '--accent': '#3b82f6',
+  '--accent-soft': 'rgba(59, 130, 246, 0.18)',
+  '--tab': '#2a2e38',
+  '--tab-active': '#323644',
+  '--scrollbar-thumb': '#3a3f4d',
+  '--scrollbar-thumb-hover': '#525868',
+};
+
+function mixHex(a, b, t) {
+  const parse = (hex) => {
+    const h = String(hex || '').replace('#', '');
+    if (h.length !== 6) return null;
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  };
+  const A = parse(a);
+  const B = parse(b);
+  if (!A || !B) return a;
+  const c = A.map((v, i) => Math.round(v + (B[i] - v) * t));
+  return `#${c.map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function hexToRgba(hex, alpha) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return `rgba(59, 130, 246, ${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function hexLuminance(hex) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return 0;
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Map terminal palette onto app chrome CSS vars. */
+export function applyAppChromeFromTermTheme(theme = getTermTheme()) {
+  try {
+    const root = document.documentElement.style;
+    const bg = theme.background || APP_CHROME_DEFAULTS['--bg'];
+    const fg = theme.foreground || APP_CHROME_DEFAULTS['--text'];
+    const light = hexLuminance(bg) > 0.55;
+    const baseMuted = theme.brightBlack || APP_CHROME_DEFAULTS['--muted'];
+    // Dark themes: brightBlack is often too dim. Light themes: keep muted darker.
+    const muted = light
+      ? mixHex(baseMuted, fg, 0.2) || mixHex(fg, bg, 0.38)
+      : mixHex(baseMuted, fg, 0.42) ||
+        mixHex(bg, fg, 0.58) ||
+        APP_CHROME_DEFAULTS['--muted'];
+    const accent = theme.blue || theme.cursor || APP_CHROME_DEFAULTS['--accent'];
+    // Panels sit clearly above the terminal/editor background.
+    const panel = mixHex(bg, fg, light ? 0.05 : 0.09) || theme.black || bg;
+    const panel2 = mixHex(bg, fg, light ? 0.09 : 0.14) || panel;
+    const elevated = mixHex(bg, fg, light ? 0.03 : 0.06) || bg;
+    const border = mixHex(bg, fg, light ? 0.14 : 0.18) || muted;
+    document.documentElement.style.colorScheme = light ? 'light' : 'dark';
+    root.setProperty('--bg', bg);
+    root.setProperty('--bg-elevated', elevated);
+    root.setProperty('--panel', panel);
+    root.setProperty('--panel-2', panel2);
+    root.setProperty('--border', border);
+    root.setProperty('--text', fg);
+    root.setProperty('--muted', muted);
+    root.setProperty('--accent', accent);
+    root.setProperty('--accent-soft', hexToRgba(accent, light ? 0.14 : 0.18));
+    root.setProperty('--tab', panel2);
+    root.setProperty('--tab-active', border);
+    root.setProperty('--scrollbar-thumb', mixHex(bg, fg, light ? 0.22 : 0.25));
+    root.setProperty(
+      '--scrollbar-thumb-hover',
+      mixHex(bg, fg, light ? 0.32 : 0.36)
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function applyAppChromeDefaults() {
+  try {
+    const root = document.documentElement.style;
+    document.documentElement.style.colorScheme = 'dark';
+    for (const [key, value] of Object.entries(APP_CHROME_DEFAULTS)) {
+      root.setProperty(key, value);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Hosts / nav screens stay on DockTerm chrome.
+ * Session (local terminal or SSH) applies the selected terminal theme app-wide.
+ */
+export function syncAppChromeForView(mainView) {
+  if (mainView === 'session') {
+    applyAppChromeFromTermTheme(getTermTheme());
+  } else {
+    applyAppChromeDefaults();
+  }
+}
+
+export function applyTermFontCssVar(fontFamily = TERM_FONT_FAMILY) {
+  try {
+    document.documentElement.style.setProperty('--font-mono', fontFamily);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function applyTermBgCssVar() {
   applyTermThemeCssVars();
+  applyTermFontCssVar();
 }

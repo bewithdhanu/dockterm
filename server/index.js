@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
 import { listSshHosts, readRawConfig, writeRawConfig, upsertHost, deleteHost, getConfigPath } from './sshConfig.js';
 import {
   listSnippets,
@@ -286,7 +287,36 @@ function ptyEnv() {
     COLORTERM: 'truecolor',
     // Prevent macOS zsh from printing "Restored session: …" on every PTY spawn.
     SHELL_SESSIONS_DISABLE: '1',
+    // pyenv init can wait on a shim lock; fail fast instead of hanging the PTY.
+    PYENV_REHASH_TIMEOUT: process.env.PYENV_REHASH_TIMEOUT || '0',
   };
+}
+
+/**
+ * If a previous pyenv-rehash crashed, the prototype shim lock is left behind and
+ * every new interactive shell blocks until PYENV_REHASH_TIMEOUT. Clear it when
+ * no rehash is actually running.
+ */
+function clearStalePyenvRehashLock() {
+  try {
+    const root = process.env.PYENV_ROOT || path.join(os.homedir(), '.pyenv');
+    const lockPath = path.join(root, 'shims', '.pyenv-shim');
+    if (!fs.existsSync(lockPath)) return;
+    try {
+      execFileSync('pgrep', ['-f', 'pyenv-rehash'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      // A rehash is running — leave the lock alone.
+      return;
+    } catch {
+      // pgrep exit 1 = no match
+    }
+    fs.unlinkSync(lockPath);
+    console.log(`Cleared stale pyenv rehash lock: ${lockPath}`);
+  } catch (err) {
+    console.warn('Could not clear pyenv rehash lock:', err?.message || err);
+  }
 }
 
 function createPty(cols = 80, rows = 24, { cwd } = {}) {
@@ -296,6 +326,8 @@ function createPty(cols = 80, rows = 24, { cwd } = {}) {
       `No usable shell found. Tried: ${shellCandidates.join(', ') || '(none)'}`,
     );
   }
+
+  clearStalePyenvRehashLock();
 
   const startCwd = resolveExistingCwd(cwd) || os.homedir();
   // Non-login interactive shells only — login shells (-l) trigger zsh session restore spam.
@@ -468,8 +500,7 @@ wss.on('connection', (ws) => {
         const title =
           (typeof msg.title === 'string' && msg.title.trim()) ||
           term.__sshHost ||
-          path.basename(term.__shellPath || shellsFallbackLabel()) ||
-          'shell';
+          (term.__kind === 'ssh' ? 'ssh' : null);
 
         const host = platformInfo();
         send({

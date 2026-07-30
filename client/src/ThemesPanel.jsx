@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   TERMINAL_THEMES,
-  TERM_FONTS,
   TERM_FONT_SIZE_MIN,
   TERM_FONT_SIZE_MAX,
   TERM_THEME_EVENT,
   getTermThemeId,
-  getTermFontId,
   getTermFontSize,
   setTermThemeId,
-  setTermFontId,
   setTermFontSize,
 } from './terminalThemes.js';
 
@@ -35,22 +32,16 @@ function ThemePreview({ theme }) {
 
 export function ThemesPanel() {
   const [themeId, setThemeId] = useState(() => getTermThemeId());
-  const [fontId, setFontId] = useState(() => getTermFontId());
   const [fontSize, setFontSize] = useState(() => getTermFontSize());
-  const [fontOpen, setFontOpen] = useState(false);
 
   useEffect(() => {
     const onTheme = (e) => {
       if (e?.detail?.id) setThemeId(e.detail.id);
-      if (e?.detail?.fontId) setFontId(e.detail.fontId);
       if (e?.detail?.fontSize) setFontSize(e.detail.fontSize);
     };
     window.addEventListener(TERM_THEME_EVENT, onTheme);
     return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
   }, []);
-
-  const currentFont =
-    TERM_FONTS.find((f) => f.id === fontId) || TERM_FONTS[0];
 
   return (
     <div className="themes-panel">
@@ -81,82 +72,22 @@ export function ThemesPanel() {
         })}
       </div>
 
-      <div className={`themes-font-section ${fontOpen ? 'open' : ''}`}>
-        <button
-          type="button"
-          className="themes-font-toggle"
-          aria-expanded={fontOpen}
-          onClick={() => setFontOpen((open) => !open)}
-        >
-          <span className="themes-font-toggle-label">Font & size</span>
-          <span
-            className="themes-font-toggle-meta"
-            style={{ fontFamily: currentFont.value }}
-          >
-            {currentFont.label} · {fontSize}px
-          </span>
-          <span className="themes-font-toggle-chevron" aria-hidden="true">
-            {fontOpen ? '▾' : '▸'}
-          </span>
-        </button>
-
-        {fontOpen ? (
-          <div className="themes-font-controls">
-            <div className="themes-font-field">
-              <span className="themes-font-label">Font</span>
-              <div
-                className="themes-font-cards"
-                role="listbox"
-                aria-label="Terminal font"
-              >
-                {TERM_FONTS.map((font) => {
-                  const selected = font.id === fontId;
-                  return (
-                    <button
-                      key={font.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      className={`font-card ${selected ? 'selected' : ''}`}
-                      onClick={() => setTermFontId(font.id)}
-                      title={font.label}
-                    >
-                      <span
-                        className="font-card-sample"
-                        style={{ fontFamily: font.value }}
-                      >
-                        Aa
-                      </span>
-                      <span
-                        className="font-card-name"
-                        style={{ fontFamily: font.value }}
-                      >
-                        {font.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <label className="themes-font-field themes-font-size-field">
-              <span className="themes-font-label">
-                Size{' '}
-                <span className="themes-font-size-value">{fontSize}px</span>
-              </span>
-              <input
-                className="themes-font-seek"
-                type="range"
-                min={TERM_FONT_SIZE_MIN}
-                max={TERM_FONT_SIZE_MAX}
-                step={1}
-                value={fontSize}
-                onChange={(e) => setTermFontSize(Number(e.target.value))}
-                aria-label="Terminal font size"
-              />
-            </label>
-          </div>
-        ) : null}
-      </div>
+      <label className="themes-font-size-field">
+        <span className="themes-font-label">
+          Font size{' '}
+          <span className="themes-font-size-value">{fontSize}px</span>
+        </span>
+        <input
+          className="themes-font-seek"
+          type="range"
+          min={TERM_FONT_SIZE_MIN}
+          max={TERM_FONT_SIZE_MAX}
+          step={1}
+          value={fontSize}
+          onChange={(e) => setTermFontSize(Number(e.target.value))}
+          aria-label="Terminal font size"
+        />
+      </label>
     </div>
   );
 }

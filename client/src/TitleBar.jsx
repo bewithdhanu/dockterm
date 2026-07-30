@@ -10,9 +10,9 @@ export function useElectronShell() {
 }
 
 /**
- * Frameless top chrome: brand + session tabs (children) + window controls.
+ * Frameless top chrome: brand + session tabs (children) + trailing + window controls.
  */
-export function TitleBar({ children }) {
+export function TitleBar({ children, trailing = null, session = false }) {
   const api = useElectronShell();
   const [maximized, setMaximized] = useState(false);
   const isMac = api?.platform === 'darwin';
@@ -33,7 +33,7 @@ export function TitleBar({ children }) {
     <header
       className={`top-chrome ${isElectron ? 'is-electron' : ''} ${
         isMac ? 'is-mac' : 'is-win'
-      }`}
+      } ${session ? 'is-session' : ''}`}
       onDoubleClick={() => {
         if (!api) return;
         api.maximize?.();
@@ -51,6 +51,10 @@ export function TitleBar({ children }) {
       </div>
 
       <div className="top-chrome-tabs">{children}</div>
+
+      {trailing ? (
+        <div className="top-chrome-trailing">{trailing}</div>
+      ) : null}
 
       {isElectron && !isMac && (
         <div className="app-titlebar-controls">

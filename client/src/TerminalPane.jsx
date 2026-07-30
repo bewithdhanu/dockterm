@@ -7,9 +7,9 @@ import '@xterm/xterm/css/xterm.css';
 import { MAX_SCROLLBACK_ROWS } from './sessionPersist.js';
 import {
   TERM_THEME_EVENT,
+  TERM_FONT_FAMILY,
   applyTermBgCssVar,
   getTermTheme,
-  getTermFontFamily,
   getTermFontSize,
 } from './terminalThemes.js';
 
@@ -23,6 +23,132 @@ function stripAnsi(text) {
 function lastPromptLine(buf) {
   const lines = String(buf || '').split(/\r?\n/);
   return lines[lines.length - 1] || '';
+}
+
+function lastMeaningfulLines(text, max = 4) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.slice(-max).join('\n');
+}
+
+/**
+ * Derive a compact banner from diverted SSH connect output.
+ * Host-key / password prompts surface as structured UI instead of a full-screen log.
+ */
+function deriveSshBanner(text, mode, host, opts = {}) {
+  const plain = String(text || '');
+  const lower = plain.toLowerCase();
+
+  if (mode === 'error') {
+    return {
+      kind: 'error',
+      title: host ? `SSH failed · ${host}` : 'SSH failed',
+      detail:
+        lastMeaningfulLines(plain, 5) || 'Connection failed.',
+      confirm: null,
+    };
+  }
+
+  const hostKey =
+    /are you sure you want to continue connecting/i.test(plain) ||
+    /authenticity of host .+ can'?t be established/i.test(plain);
+
+  if (hostKey) {
+    const authenticity = plain.match(
+      /The authenticity of host[\s\S]*?(?=Are you sure|$)/i
+    );
+    const fingerprint = plain.match(
+      /(?:ED25519|RSA|ECDSA|DSA)\s+key fingerprint is\s+\S+/i
+    );
+    const detail = [
+      authenticity?.[0]?.trim(),
+      fingerprint && !authenticity?.[0]?.includes(fingerprint[0])
+        ? fingerprint[0]
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+
+    if (opts.hostKeyAnswered) {
+      return {
+        kind: 'connecting',
+        title: host ? `Connecting · ${host}` : 'Connecting…',
+        detail: 'Host key accepted — finishing sign-in…',
+        confirm: null,
+      };
+    }
+
+    return {
+      kind: 'confirm',
+      title: 'Trust this host?',
+      detail:
+        detail ||
+        'This host is not in your known_hosts allow list yet.',
+      confirm: 'hostkey',
+    };
+  }
+
+  if (
+    /password:/i.test(plain) ||
+    /passphrase for/i.test(plain) ||
+    /verification code:/i.test(plain)
+  ) {
+    return {
+      kind: 'auth',
+      title: host ? `Sign in · ${host}` : 'Authentication',
+      detail: /passphrase/i.test(plain)
+        ? 'Enter your key passphrase…'
+        : /verification code/i.test(plain)
+          ? 'Enter the verification code…'
+          : 'Enter your password…',
+      confirm: null,
+    };
+  }
+
+  if (
+    /connection refused|connection timed out|no route to host|could not resolve|network is unreachable|connection reset|operation timed out/i.test(
+      lower
+    )
+  ) {
+    return {
+      kind: 'retry',
+      title: host ? `Retrying · ${host}` : 'Retrying…',
+      detail: lastMeaningfulLines(plain, 3) || 'Waiting to reconnect…',
+      confirm: null,
+    };
+  }
+
+  return {
+    kind: 'connecting',
+    title: host ? `Connecting · ${host}` : 'Connecting…',
+    detail: lastMeaningfulLines(plain, 2) || 'Establishing SSH session…',
+    confirm: null,
+  };
+}
+
+function applyConnectingCursor(term, connecting) {
+  if (!term) return;
+  try {
+    term.options.cursorBlink = !connecting;
+    const base = getTermTheme();
+    if (connecting) {
+      // Match bg so any leftover cursor draw is invisible (xterm rejects "transparent").
+      const bg = base.background || '#000000';
+      term.options.theme = {
+        ...base,
+        cursor: bg,
+        cursorAccent: bg,
+      };
+    } else {
+      term.options.theme = base;
+    }
+    term.refresh(0, term.rows - 1);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function TerminalPane({
@@ -65,6 +191,7 @@ export function TerminalPane({
   const setOverlayRef = useRef(setOverlay);
   setOverlayRef.current = setOverlay;
   const overlayDismissedRef = useRef(false);
+  const [hostKeyAnswered, setHostKeyAnswered] = useState(false);
 
   onTitleRef.current = onTitle;
   onCwdRef.current = onCwd;
@@ -82,6 +209,13 @@ export function TerminalPane({
       divertRef.current = true;
       finishedConnectRef.current = false;
       overlayDismissedRef.current = false;
+      setHostKeyAnswered(false);
+      applyConnectingCursor(termRef.current, true);
+      try {
+        termRef.current?.blur();
+      } catch {
+        /* ignore */
+      }
       setOverlay({
         mode: 'connecting',
         text: stripAnsi(connectLogRef.current),
@@ -89,6 +223,7 @@ export function TerminalPane({
       });
     } else if (sshStatus === 'error') {
       divertRef.current = false;
+      applyConnectingCursor(termRef.current, false);
       if (!overlayDismissedRef.current) {
         setOverlay({
           mode: 'error',
@@ -99,11 +234,13 @@ export function TerminalPane({
     } else if (sshStatus === 'connected' && !finishedConnectRef.current) {
       finishedConnectRef.current = true;
       divertRef.current = false;
+      applyConnectingCursor(termRef.current, false);
       const term = termRef.current;
       const raw = connectLogRef.current;
       const prompt = lastPromptLine(raw);
       connectLogRef.current = '';
       setOverlay(null);
+      setHostKeyAnswered(false);
 
       if (!term) return;
       try {
@@ -121,6 +258,8 @@ export function TerminalPane({
       } catch {
         /* ignore */
       }
+    } else if (sshStatus === 'connected') {
+      applyConnectingCursor(termRef.current, false);
     }
   }, [isSsh, sshStatus, sshHost, id]);
 
@@ -131,17 +270,26 @@ export function TerminalPane({
 
     applyTermBgCssVar();
 
+    const connecting = Boolean(isSsh && sshStatusRef.current === 'connecting');
+    const baseTheme = getTermTheme();
+    const hideCursorTheme = connecting
+      ? {
+          ...baseTheme,
+          cursor: baseTheme.background || '#000000',
+          cursorAccent: baseTheme.background || '#000000',
+        }
+      : baseTheme;
     const term = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !connecting,
       cursorStyle: 'bar',
       cursorWidth: 2,
-      fontFamily: getTermFontFamily(),
+      fontFamily: TERM_FONT_FAMILY,
       fontSize: getTermFontSize(),
       lineHeight: 1.2,
       letterSpacing: 0,
       fontWeight: '400',
       fontWeightBold: '700',
-      theme: getTermTheme(),
+      theme: hideCursorTheme,
       allowProposedApi: true,
       scrollback: 10000,
       macOptionIsMeta: true,
@@ -271,18 +419,6 @@ export function TerminalPane({
     ro.observe(el);
 
     const start = async () => {
-      try {
-        if (document.fonts?.load) {
-          await Promise.all([
-            document.fonts.load('14px "MesloLGS NF"'),
-            document.fonts.load('bold 14px "MesloLGS NF"'),
-          ]);
-          await document.fonts.ready;
-        }
-      } catch {
-        /* ignore */
-      }
-
       const saved = initialScrollbackRef.current;
       initialScrollbackRef.current = null;
       if (saved) {
@@ -302,7 +438,10 @@ export function TerminalPane({
       }
 
       fitAndResize();
-      if (activeRef.current) term.focus();
+      // Don't focus while SSH is still connecting — avoids a blinking empty cursor.
+      if (activeRef.current && sshStatusRef.current !== 'connecting') {
+        term.focus();
+      }
     };
     start();
 
@@ -331,10 +470,15 @@ export function TerminalPane({
       if (!term) return;
       try {
         const theme = e?.detail?.theme || getTermTheme();
-        const fontFamily = e?.detail?.fontFamily || getTermFontFamily();
         const fontSize = e?.detail?.fontSize || getTermFontSize();
-        term.options.theme = theme;
-        term.options.fontFamily = fontFamily;
+        const connecting =
+          isSsh && sshStatusRef.current === 'connecting';
+        const bg = theme.background || '#000000';
+        term.options.theme = connecting
+          ? { ...theme, cursor: bg, cursorAccent: bg }
+          : theme;
+        term.options.cursorBlink = !connecting;
+        term.options.fontFamily = TERM_FONT_FAMILY;
         term.options.fontSize = fontSize;
         term.refresh(0, term.rows - 1);
         if (fit) {
@@ -352,7 +496,7 @@ export function TerminalPane({
     };
     window.addEventListener(TERM_THEME_EVENT, onTheme);
     return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
-  }, [id]);
+  }, [id, isSsh]);
 
   useEffect(() => {
     if (!visible) return;
@@ -378,6 +522,8 @@ export function TerminalPane({
 
   useEffect(() => {
     if (!active) return;
+    // Keep focus off the empty PTY while connecting (password auth re-focuses later).
+    if (isSsh && sshStatus === 'connecting') return;
     const term = termRef.current;
     if (!term) return;
     const frame = requestAnimationFrame(() => {
@@ -388,35 +534,58 @@ export function TerminalPane({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [active, id]);
+  }, [active, id, isSsh, sshStatus]);
 
-  // Auto-scroll overlay log as bytes arrive.
-  const logRef = useRef(null);
+  const banner = overlay
+    ? deriveSshBanner(overlay.text, overlay.mode, overlay.host, {
+        hostKeyAnswered,
+      })
+    : null;
+
+  // Focus when password / OTP is needed so the user can type without clicking.
   useEffect(() => {
-    const el = logRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [overlay?.text]);
+    if (!active || !banner || banner.kind !== 'auth') return;
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      term.focus();
+    } catch {
+      /* ignore */
+    }
+  }, [active, banner?.kind]);
+
+  const sendConnectReply = (data) => {
+    if (data === 'yes\n' || data === 'no\n') {
+      setHostKeyAnswered(true);
+    }
+    sendRef.current({ type: 'input', id, data });
+    try {
+      termRef.current?.focus();
+    } catch {
+      /* ignore */
+    }
+  };
 
   return (
-    <div className="terminal-host-wrap">
+    <div
+      className={`terminal-host-wrap${
+        isSsh && sshStatus === 'connecting' ? ' is-connecting' : ''
+      }`}
+    >
       <div className="terminal-host" ref={containerRef} />
-      {overlay && (
+      {overlay && banner && (
         <div
-          className={`ssh-connect-overlay mode-${overlay.mode}`}
+          className={`ssh-connect-toast mode-${banner.kind}`}
+          role="status"
           aria-live="polite"
         >
-          <div className="ssh-connect-overlay-header">
-            <span className="ssh-connect-overlay-dot" />
-            <span>
-              {overlay.mode === 'error'
-                ? `SSH failed${overlay.host ? ` · ${overlay.host}` : ''}`
-                : `Connecting${overlay.host ? ` · ${overlay.host}` : ''}…`}
-            </span>
+          <div className="ssh-connect-toast-header">
+            <span className="ssh-connect-toast-dot" />
+            <span className="ssh-connect-toast-title">{banner.title}</span>
             {overlay.mode === 'error' ? (
               <button
                 type="button"
-                className="ssh-connect-overlay-dismiss"
+                className="ssh-connect-toast-btn quiet"
                 onClick={() => {
                   overlayDismissedRef.current = true;
                   setOverlay(null);
@@ -426,17 +595,37 @@ export function TerminalPane({
               </button>
             ) : null}
           </div>
-          <pre ref={logRef} className="ssh-connect-overlay-log">
-            {overlay.text ||
-              (overlay.mode === 'error'
-                ? 'No output captured.'
-                : 'Waiting for remote…')}
-          </pre>
-          <div className="ssh-connect-overlay-hint">
-            {overlay.mode === 'error'
-              ? 'Tab kept open — dismiss to see the terminal, or close the tab when done.'
-              : 'Password / prompts: type normally (focus stays on the terminal).'}
-          </div>
+          {banner.detail ? (
+            <pre className="ssh-connect-toast-detail">{banner.detail}</pre>
+          ) : null}
+          {banner.confirm === 'hostkey' ? (
+            <div className="ssh-connect-toast-actions">
+              <button
+                type="button"
+                className="ssh-connect-toast-btn danger"
+                onClick={() => sendConnectReply('no\n')}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ssh-connect-toast-btn primary"
+                onClick={() => sendConnectReply('yes\n')}
+              >
+                Trust & continue
+              </button>
+            </div>
+          ) : null}
+          {banner.kind === 'auth' ? (
+            <div className="ssh-connect-toast-hint">
+              Type in the terminal — input is not shown here.
+            </div>
+          ) : null}
+          {banner.kind === 'error' ? (
+            <div className="ssh-connect-toast-hint">
+              Tab kept open so you can retry or close it.
+            </div>
+          ) : null}
         </div>
       )}
     </div>

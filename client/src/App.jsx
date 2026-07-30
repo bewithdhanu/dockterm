@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LuPanelLeft, LuPanelRight } from 'react-icons/lu';
 import { TitleBar } from './TitleBar.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
 import { NavRail } from './NavRail.jsx';
@@ -18,6 +19,10 @@ import { clearSession, saveSession } from './sessionPersist.js';
 import { endsWithShellPrompt } from './shellPrompt.js';
 import { nextCopyAlias, useSshHosts } from './useSshHosts.js';
 import { useHostOs } from './useHostOs.js';
+import {
+  TERM_THEME_EVENT,
+  syncAppChromeForView,
+} from './terminalThemes.js';
 
 const SSH_CONFIG_TAB_ID = 'editor:ssh-config';
 const NAV_KEY = 'dockterm.nav-section';
@@ -65,6 +70,8 @@ export default function App() {
   const pendingRef = useRef(new Map());
   /** @type {React.MutableRefObject<Map<string, any>>} */
   const pendingByKeyRef = useRef(new Map());
+  /** Outbound WS messages queued while the socket is connecting. */
+  const outboxRef = useRef([]);
   const closedStackRef = useRef([]);
   /** Rolling SSH output used to detect first shell prompt (connecting → connected). */
   const sshPromptBufRef = useRef(new Map());
@@ -84,12 +91,23 @@ export default function App() {
     readBool(SESSION_HOSTS_KEY, true)
   );
   const [sessionSnippetsOpen, setSessionSnippetsOpen] = useState(() =>
-    readBool(SESSION_SNIPPETS_KEY, true)
+    readBool(SESSION_SNIPPETS_KEY, false)
   );
   const [dragTabId, setDragTabId] = useState(null);
   const [dropTarget, setDropTarget] = useState(null); // { id, zone: 'right'|'bottom' }
   const hostsApi = useSshHosts();
   const hostOs = useHostOs();
+
+  // Hosts view = DockTerm chrome; session (local/SSH) = selected terminal theme app-wide.
+  useEffect(() => {
+    syncAppChromeForView(mainView);
+  }, [mainView]);
+
+  useEffect(() => {
+    const onTheme = () => syncAppChromeForView(mainView);
+    window.addEventListener(TERM_THEME_EVENT, onTheme);
+    return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
+  }, [mainView]);
 
   const registerHandlers = useCallback((id, handlers) => {
     handlersRef.current.set(id, handlers);
@@ -121,6 +139,23 @@ export default function App() {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
+      return;
+    }
+    // Queue creates (and only creates) so "+" / connect still work during WS setup.
+    if (msg?.type === 'create') {
+      outboxRef.current.push(msg);
+    }
+  }, []);
+
+  const flushOutbox = useCallback((ws) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const queued = outboxRef.current.splice(0);
+    for (const msg of queued) {
+      try {
+        ws.send(JSON.stringify(msg));
+      } catch {
+        /* ignore */
+      }
     }
   }, []);
 
@@ -274,14 +309,19 @@ export default function App() {
         if (!bootstrapped.current) {
           bootstrapped.current = true;
           // Do not auto-restore SSH/terminal sessions on page load/refresh.
-          // Stay on the hosts screen until the user opens a connection.
+          // Stay on the hosts screen until the user opens a connection —
+          // unless they already queued a create while the socket was connecting.
+          const hadQueuedCreates = outboxRef.current.length > 0;
           clearSession();
-          setMainView('hosts');
           setTabs([]);
           setActiveId(null);
+          setMainView(hadQueuedCreates ? 'session' : 'hosts');
+          flushOutbox(ws);
         } else {
           // Recreate PTYs after server dropped them; skip if restore already in flight.
           resumeAfterReconnect(ws);
+          // Keep any creates the user issued during the reconnect gap.
+          flushOutbox(ws);
         }
       };
 
@@ -393,10 +433,10 @@ export default function App() {
             return;
           }
 
-          const title = pending?.title || msg.title || 'Terminal';
+          const title = pending?.title || msg.title || null;
           const tab = {
             id: groupId(),
-            title,
+            title: title || 'Terminal',
             kind: 'terminal',
             direction: 'row',
             panes: [{ ...pane, scrollback: '' }],
@@ -1163,8 +1203,50 @@ export default function App() {
   }, [openConfigEditor]);
 
   return (
-    <div className="app">
-      <TitleBar>
+    <div className={`app ${mainView === 'session' ? 'is-session' : ''}`}>
+      <TitleBar
+        session={mainView === 'session'}
+        trailing={
+          mainView === 'session' ? (
+            <div className="chrome-panel-toggles" role="group" aria-label="Panels">
+              <button
+                type="button"
+                className={`chrome-panel-toggle ${
+                  sessionHostsOpen ? 'active' : ''
+                }`}
+                title={sessionHostsOpen ? 'Hide hosts' : 'Show hosts'}
+                aria-pressed={sessionHostsOpen}
+                onClick={() => setSessionHosts(!sessionHostsOpen)}
+              >
+                <LuPanelLeft size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`chrome-panel-toggle ${
+                  sessionSnippetsOpen && !hostDetail ? 'active' : ''
+                }`}
+                title={
+                  sessionSnippetsOpen && !hostDetail
+                    ? 'Hide sidebar'
+                    : 'Show sidebar'
+                }
+                aria-pressed={sessionSnippetsOpen && !hostDetail}
+                onClick={() => {
+                  if (sessionSnippetsOpen && !hostDetail) {
+                    setSessionSnippets(false);
+                    return;
+                  }
+                  setHostDetail(null);
+                  setSnippetDetail(null);
+                  setSessionSnippets(true);
+                }}
+              >
+                <LuPanelRight size={15} aria-hidden="true" />
+              </button>
+            </div>
+          ) : null
+        }
+      >
         <div className="tabbar" onContextMenu={(e) => openCtxMenu(e, null)}>
           <button
             type="button"
@@ -1172,8 +1254,17 @@ export default function App() {
             onClick={() => selectNav('hosts')}
             title="Hosts"
           >
+            <span className="tab-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <path
+                  fill="currentColor"
+                  d="M2.5 2.5h4v4h-4v-4zm7 0h4v4h-4v-4zm-7 7h4v4h-4v-4zm7 0h4v4h-4v-4z"
+                />
+              </svg>
+            </span>
             <span className="tab-title">Hosts</span>
           </button>
+          <div className="tab-sep" aria-hidden="true" />
           <div className="tabs" onContextMenu={(e) => openCtxMenu(e, null)}>
             {tabs.map((tab) => {
               const isDrop =
@@ -1243,9 +1334,6 @@ export default function App() {
                       if (name) renameTab(tab.id, name.trim());
                     }}
                   >
-                    <span className="tab-title">
-                      {tab.kind === 'editor' ? tab.title : tab.title}
-                    </span>
                     <span
                       className="tab-close"
                       role="button"
@@ -1258,6 +1346,9 @@ export default function App() {
                       title="Close tab"
                     >
                       ×
+                    </span>
+                    <span className="tab-title">
+                      {tab.kind === 'editor' ? tab.title : tab.title}
                     </span>
                   </button>
                   {isDrop && (
@@ -1308,21 +1399,16 @@ export default function App() {
               setHostDetail({ mode: 'duplicate', host, sourceAlias });
             }}
           />
-        ) : (
-          <button
-            type="button"
-            className="edge-reopen left"
-            title="Show hosts"
-            onClick={() => setSessionHosts(true)}
-          >
-            ›
-            <span>Hosts</span>
-          </button>
-        )}
+        ) : null}
 
         <div className="main-col">
-          {mainView === 'hosts' ? (
-            navSection === 'snippets' ? (
+          <div
+            className={`hosts-main ${
+              mainView === 'hosts' ? 'visible' : 'hidden'
+            }`}
+            aria-hidden={mainView !== 'hosts'}
+          >
+            {navSection === 'snippets' ? (
               <SnippetsView
                 selectedId={
                   snippetDetail?.mode === 'edit'
@@ -1381,35 +1467,39 @@ export default function App() {
                   setHostDetail({ mode: 'duplicate', host, sourceAlias });
                 }}
               />
-            )
-          ) : (
-            <main className="panes">
-              {tabs.length === 0 && (
-                <div className="empty">
-                  {connected ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMainView('hosts');
-                      }}
-                    >
-                      Browse hosts
-                    </button>
-                  ) : (
-                    <p>Connecting to PTY server…</p>
-                  )}
-                </div>
-              )}
-              {tabs.map((tab) => (
+            )}
+          </div>
+
+          <main
+            className={`panes ${mainView === 'session' ? 'visible' : 'hidden'}`}
+            aria-hidden={mainView !== 'session'}
+          >
+            {tabs.length === 0 && (
+              <div className="empty">
+                {connected ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMainView('hosts');
+                    }}
+                  >
+                    Browse hosts
+                  </button>
+                ) : (
+                  <p>Connecting to PTY server…</p>
+                )}
+              </div>
+            )}
+            {tabs.map((tab) => {
+              const tabActive = mainView === 'session' && tab.id === activeId;
+              return (
                 <div
                   key={tab.id}
-                  className={`pane ${
-                    tab.id === activeId ? 'visible' : 'hidden'
-                  }`}
+                  className={`pane ${tabActive ? 'visible' : 'hidden'}`}
                 >
                   {tab.kind === 'editor' ? (
                     <ConfigEditorPane
-                      active={tab.id === activeId}
+                      active={tabActive}
                       onHostsChanged={() => {
                         window.dispatchEvent(new Event('ssh-hosts-changed'));
                       }}
@@ -1423,7 +1513,7 @@ export default function App() {
                   ) : (
                     <TerminalSplitView
                       tab={tab}
-                      active={tab.id === activeId}
+                      active={tabActive}
                       focusedPaneId={tab.focusedPaneId}
                       onFocusPane={(paneId) => focusPane(tab.id, paneId)}
                       onClosePane={(paneId) => closePane(tab.id, paneId)}
@@ -1433,6 +1523,9 @@ export default function App() {
                       registerStatsHandlers={registerStatsHandlers}
                       registerSerializer={registerSerializer}
                       onPaneTitle={(paneId, title) => {
+                        const pane = tab.panes.find((p) => p.id === paneId);
+                        // Keep SSH connection / alias name — don't replace with user@host.
+                        if (pane?.ssh) return;
                         if (tab.panes[0]?.id === paneId && title) {
                           renameTab(tab.id, title);
                         }
@@ -1443,9 +1536,9 @@ export default function App() {
                     />
                   )}
                 </div>
-              ))}
-            </main>
-          )}
+              );
+            })}
+          </main>
         </div>
 
         {hostDetail && (
@@ -1572,18 +1665,6 @@ export default function App() {
             onRun={runSnippet}
             onClose={() => setSessionSnippets(false)}
           />
-        )}
-
-        {mainView === 'session' && !sessionSnippetsOpen && !hostDetail && (
-          <button
-            type="button"
-            className="edge-reopen right"
-            title="Show sidebar"
-            onClick={() => setSessionSnippets(true)}
-          >
-            <span>Sidebar</span>
-            ‹
-          </button>
         )}
       </div>
 

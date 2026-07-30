@@ -1,0 +1,16 @@
+#!/bin/bash
+# Homebrew's default `node` (v25) is currently broken (missing simdjson.31).
+# Always run DockTerm through Node 22.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+NODE22_BIN="${NODE22_BIN:-/opt/homebrew/opt/node@22/bin}"
+export PATH="${NODE22_BIN}:${PATH}"
+
+if [[ ! -x "${NODE22_BIN}/node" ]]; then
+  echo "Node 22 not found at ${NODE22_BIN}/node" >&2
+  echo "Install with: brew install node@22" >&2
+  exit 1
+fi
+
+cd "$ROOT"
+exec "${NODE22_BIN}/node" "${NODE22_BIN}/../lib/node_modules/npm/bin/npm-cli.js" run dev:app "$@"
