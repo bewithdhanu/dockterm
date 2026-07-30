@@ -150,9 +150,9 @@ async function ensureBackend() {
 
 function hideMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  // Close acts as minimize-to-background; keep UI process + backend + WS.
-  if (mainWindow.isMinimized()) return;
-  mainWindow.minimize();
+  // Close = hide window; keep UI process + backend + WS alive until Quit.
+  if (!mainWindow.isVisible()) return;
+  mainWindow.hide();
 }
 
 function showMainWindow() {
