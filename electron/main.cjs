@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -232,6 +232,65 @@ function buildWindowOptions() {
   return windowOpts;
 }
 
+/** Native menu without Chromium/browser defaults (no View/Help/visible Edit). */
+function installAppMenu() {
+  const isMac = process.platform === 'darwin';
+
+  /** @type {import('electron').MenuItemConstructorOptions[]} */
+  const template = [];
+
+  if (isMac) {
+    template.push({
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    });
+
+    template.push({
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' },
+        { type: 'separator' },
+        {
+          label: 'Close Window',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow() || mainWindow;
+            if (win && !win.isDestroyed()) win.close();
+          },
+        },
+      ],
+    });
+  } else {
+    // Framed-less Windows/Linux: only Quit — no always-on Edit/View chrome.
+    template.push({
+      label: 'File',
+      submenu: [{ role: 'quit' }],
+    });
+  }
+
+  // Hidden: keeps ⌘C / ⌘V / ⌘A working without a visible Edit menu.
+  template.push({
+    label: 'Edit',
+    visible: false,
+    submenu: [{ role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }],
+  });
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow(buildWindowOptions());
 
@@ -282,6 +341,7 @@ function shutdown() {
 
 app.whenReady().then(() => {
   wireWindowControls();
+  installAppMenu();
   if (process.platform === 'darwin' && app.dock) {
     const icon = resolveIcon();
     if (icon) {
