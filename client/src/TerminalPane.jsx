@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LuCheck, LuCopy } from 'react-icons/lu';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -19,6 +20,49 @@ function stripAnsi(text) {
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     .replace(/\r/g, '');
+}
+
+async function writeClipboard(text) {
+  const value = String(text ?? '');
+  const api = typeof window !== 'undefined' ? window.dockterm : null;
+  if (api?.clipboardWrite) {
+    await api.clipboardWrite(value);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } finally {
+      ta.remove();
+    }
+  }
+}
+
+async function readClipboard() {
+  const api = typeof window !== 'undefined' ? window.dockterm : null;
+  if (api?.clipboardRead) {
+    return String((await api.clipboardRead()) ?? '');
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return '';
+  }
+}
+
+function isMacPlatform() {
+  return (
+    /Mac|iPhone|iPod|iPad/.test(navigator.platform) ||
+    navigator.userAgent.includes('Mac')
+  );
 }
 
 function lastPromptLine(buf) {
@@ -570,6 +614,54 @@ export function TerminalPane({
     fitRef.current = fit;
     serializeRef.current = serializeAddon;
 
+    // xterm selection is not DOM text — handle clipboard ourselves.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true;
+      const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
+      const mac = isMacPlatform();
+      const primary = mac ? ev.metaKey : ev.ctrlKey;
+
+      // ⌘C / Ctrl+Shift+C → copy selection (Ctrl+C alone still sends ^C except when
+      // there is a selection on non-Mac, matching common terminal apps).
+      if (
+        ((primary && key === 'c' && !ev.shiftKey && !ev.altKey) ||
+          (ev.ctrlKey && ev.shiftKey && key === 'c')) &&
+        term.hasSelection()
+      ) {
+        void writeClipboard(term.getSelection());
+        return false;
+      }
+
+      // ⌘V / Ctrl+V / Ctrl+Shift+V → paste
+      if (
+        (primary && key === 'v' && !ev.altKey && (mac || !ev.shiftKey)) ||
+        (ev.ctrlKey && ev.shiftKey && key === 'v')
+      ) {
+        void readClipboard().then((text) => {
+          if (text) term.paste(text);
+        });
+        return false;
+      }
+
+      return true;
+    });
+
+    const onCopy = (e) => {
+      if (!term.hasSelection()) return;
+      e.preventDefault();
+      const text = term.getSelection();
+      e.clipboardData?.setData('text/plain', text);
+      void writeClipboard(text);
+    };
+    const onPaste = (e) => {
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text) return;
+      e.preventDefault();
+      term.paste(text);
+    };
+    el.addEventListener('copy', onCopy);
+    el.addEventListener('paste', onPaste);
+
     const fitAndResize = () => {
       try {
         fit.fit();
@@ -739,6 +831,8 @@ export function TerminalPane({
       clearTimeout(t1);
       clearTimeout(t2);
       ro.disconnect();
+      el.removeEventListener('copy', onCopy);
+      el.removeEventListener('paste', onPaste);
       dataDisp.dispose();
       titleDisp.dispose();
       unregister();
@@ -1128,23 +1222,9 @@ export function TerminalPane({
                 onClick={copyLog}
               >
                 {logCopied ? (
-                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                    <path
-                      fill="currentColor"
-                      d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 4.6-4.6L12.2 5.5 6.5 11.2z"
-                    />
-                  </svg>
+                  <LuCheck size={13} aria-hidden="true" />
                 ) : (
-                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                    <path
-                      fill="currentColor"
-                      d="M5.5 2A1.5 1.5 0 0 0 4 3.5v8A1.5 1.5 0 0 0 5.5 13H11a1 1 0 0 0 1-1V3.5A1.5 1.5 0 0 0 10.5 2h-5zM5 3.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V11H5.5a.5.5 0 0 1-.5-.5v-7z"
-                    />
-                    <path
-                      fill="currentColor"
-                      d="M2 5.5A1.5 1.5 0 0 1 3.5 4H4v1h-.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5H9v1H3.5A1.5 1.5 0 0 1 2 12.5v-7z"
-                    />
-                  </svg>
+                  <LuCopy size={13} aria-hidden="true" />
                 )}
               </button>
             ) : null}

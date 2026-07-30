@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { LuCheck, LuCopy, LuHistory, LuSearch } from 'react-icons/lu';
 import {
   HistoryDayCalendar,
   SearchableHostFilter,
@@ -42,34 +43,17 @@ function startOfLocalDay(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M5.5 2A1.5 1.5 0 0 0 4 3.5v8A1.5 1.5 0 0 0 5.5 13H11a1 1 0 0 0 1-1V3.5A1.5 1.5 0 0 0 10.5 2h-5zM5 3.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V11H5.5a.5.5 0 0 1-.5-.5v-7z"
-      />
-      <path
-        fill="currentColor"
-        d="M2 5.5A1.5 1.5 0 0 1 3.5 4H4v1h-.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5H9v1H3.5A1.5 1.5 0 0 1 2 12.5v-7z"
-      />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 4.6-4.6L12.2 5.5 6.5 11.2z"
-      />
-    </svg>
-  );
-}
-
 async function copyText(text) {
   const value = String(text || '');
+  const api = typeof window !== 'undefined' ? window.dockterm : null;
+  if (api?.clipboardWrite) {
+    try {
+      await api.clipboardWrite(value);
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
   try {
     await navigator.clipboard.writeText(value);
     return true;
@@ -91,9 +75,118 @@ async function copyText(text) {
 }
 
 /**
+ * Right-side detail pane for a history entry (hosts → History).
+ */
+export function HistoryDetailPanel({ entry, onClose, onRun }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!entry) return null;
+
+  const when = formatWhen(entry.at);
+  const where = String(entry.where || 'Local').trim() || 'Local';
+  const cwd = entry.cwd ? String(entry.cwd) : '';
+
+  const copyCommand = async () => {
+    const ok = await copyText(entry.command);
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <aside
+      className="right-drawer detail-panel snippets-only"
+      aria-label="Command history details"
+    >
+      <div className="right-drawer-body snippet-detail-body">
+        <div className="snippet-side-form">
+          <div className="detail-panel-header embedded side-form-header">
+            <div>
+              <div className="detail-panel-title">Command</div>
+              <div className="detail-panel-sub">
+                {[where, when].filter(Boolean).join(' · ') || 'History'}
+              </div>
+            </div>
+            <div className="detail-panel-header-actions">
+              <button
+                type="button"
+                className="side-form-close"
+                onClick={onClose}
+                title="Close"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className="host-form snippet-form snippet-side-form-body history-detail-body">
+            <label>
+              <span>Command</span>
+              <textarea
+                value={entry.command || ''}
+                readOnly
+                rows={10}
+                spellCheck={false}
+              />
+            </label>
+
+            <div className="history-detail-meta">
+              <div className="detail-section">
+                <div className="detail-label">Host</div>
+                <div className="history-detail-value">{where}</div>
+              </div>
+              {when ? (
+                <div className="detail-section">
+                  <div className="detail-label">When</div>
+                  <div className="history-detail-value">{when}</div>
+                </div>
+              ) : null}
+              {cwd ? (
+                <div className="detail-section">
+                  <div className="detail-label">Path</div>
+                  <div
+                    className="history-detail-value history-detail-path"
+                    title={cwd}
+                  >
+                    {cwd}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="side-form-actions history-detail-actions">
+              <button
+                type="button"
+                className="btn primary side-form-save"
+                onClick={() => onRun?.({ command: entry.command })}
+              >
+                Run
+              </button>
+              <button
+                type="button"
+                className="btn side-form-save"
+                onClick={copyCommand}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/**
  * Full hosts-page Command History view (left-nav section).
  */
-export function CommandHistoryView({ onRun, onOpenTerminal, onOpenConfig }) {
+export function CommandHistoryView({
+  selectedId = null,
+  onSelect,
+  onOpenTerminal,
+  onOpenConfig,
+}) {
   const [entries, setEntries] = useState(() => loadCommandHistory());
   const [query, setQuery] = useState('');
   const [hostFilter, setHostFilter] = useState('all');
@@ -143,18 +236,11 @@ export function CommandHistoryView({ onRun, onOpenTerminal, onOpenConfig }) {
     <div className="hosts-view cmd-history-view">
       <div className="hosts-search-row">
         <div className="hosts-search">
-          <svg
+          <LuSearch
             className="hosts-search-icon"
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
+            size={16}
             aria-hidden="true"
-          >
-            <path
-              fill="currentColor"
-              d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
-            />
-          </svg>
+          />
           <input
             type="search"
             placeholder="Find a command…"
@@ -173,6 +259,7 @@ export function CommandHistoryView({ onRun, onOpenTerminal, onOpenConfig }) {
             onClick={() => {
               if (!confirm('Clear command history?')) return;
               setEntries(clearCommandHistory());
+              onSelect?.(null);
             }}
           >
             Clear
@@ -216,25 +303,30 @@ export function CommandHistoryView({ onRun, onOpenTerminal, onOpenConfig }) {
           <div className="hosts-grid cmd-history-grid">
             {filtered.map((entry) => {
               const copied = copiedId === entry.id;
+              const selected = selectedId === entry.id;
               return (
                 <div
                   key={entry.id}
-                  className="host-card snippet-card cmd-history-card"
+                  className={`host-card snippet-card cmd-history-card${
+                    selected ? ' selected' : ''
+                  }`}
                 >
                   <button
                     type="button"
                     className="cmd-history-card-run"
-                    title="Click to run again"
-                    onClick={() => onRun?.({ command: entry.command })}
+                    title="View details"
+                    aria-pressed={selected}
+                    onClick={() => onSelect?.(entry)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelect?.(entry);
+                      }
+                    }}
                   >
                     <div className="host-card-main">
                       <div className="snippet-card-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" width="18" height="18">
-                          <path
-                            fill="currentColor"
-                            d="M13 3a9 9 0 1 0 8.94 8H20a7 7 0 1 1-2.05-4.95L15 9h6V3l-2.12 2.12A8.96 8.96 0 0 0 13 3zm-1 5v5l4.2 2.5.8-1.3-3.5-2.1V8H12z"
-                          />
-                        </svg>
+                        <LuHistory size={18} />
                       </div>
                       <div className="host-card-body">
                         <div
@@ -268,7 +360,7 @@ export function CommandHistoryView({ onRun, onOpenTerminal, onOpenConfig }) {
                       }, 1200);
                     }}
                   >
-                    {copied ? <CheckIcon /> : <CopyIcon />}
+                    {copied ? <LuCheck size={14} /> : <LuCopy size={14} />}
                   </button>
                 </div>
               );

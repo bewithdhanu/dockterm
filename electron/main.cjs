@@ -165,6 +165,8 @@ function showMainWindow() {
 function wireWindowControls() {
   ipcMain.removeHandler('window:isMaximized');
   ipcMain.removeHandler('dialog:pickIdentityFile');
+  ipcMain.removeHandler('clipboard:writeText');
+  ipcMain.removeHandler('clipboard:readText');
   ipcMain.removeAllListeners('window:minimize');
   ipcMain.removeAllListeners('window:maximize');
   ipcMain.removeAllListeners('window:close');
@@ -187,6 +189,15 @@ function wireWindowControls() {
   });
   ipcMain.handle('window:isMaximized', (event) => {
     return Boolean(BrowserWindow.fromWebContents(event.sender)?.isMaximized());
+  });
+  ipcMain.handle('clipboard:writeText', (_event, text) => {
+    const { clipboard } = require('electron');
+    clipboard.writeText(String(text ?? ''));
+    return true;
+  });
+  ipcMain.handle('clipboard:readText', () => {
+    const { clipboard } = require('electron');
+    return clipboard.readText();
   });
   ipcMain.handle('dialog:pickIdentityFile', async (event) => {
     const { dialog } = require('electron');
@@ -281,13 +292,8 @@ function installAppMenu() {
     });
   }
 
-  // Hidden: keeps ⌘C / ⌘V / ⌘A working without a visible Edit menu.
-  template.push({
-    label: 'Edit',
-    visible: false,
-    submenu: [{ role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }],
-  });
-
+  // No Edit/copy/paste roles — those steal ⌘C/⌘V from xterm (DOM clipboard is empty).
+  // Terminal clipboard is handled in the renderer.
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 

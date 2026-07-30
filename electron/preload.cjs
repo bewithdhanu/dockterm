@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('dockterm', {
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   pickIdentityFile: () => ipcRenderer.invoke('dialog:pickIdentityFile'),
+  clipboardWrite: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+  clipboardRead: () => ipcRenderer.invoke('clipboard:readText'),
 });

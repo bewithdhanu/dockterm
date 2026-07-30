@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LuPanelLeft, LuPanelRight } from 'react-icons/lu';
+import { LuLayoutGrid, LuPanelLeft, LuPanelRight } from 'react-icons/lu';
 import { TitleBar } from './TitleBar.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
 import { NavRail } from './NavRail.jsx';
@@ -10,7 +10,7 @@ import {
   nextCopySnippetName,
   notifySnippetsChanged,
 } from './SnippetsView.jsx';
-import { CommandHistoryView } from './CommandHistoryView.jsx';
+import { CommandHistoryView, HistoryDetailPanel } from './CommandHistoryView.jsx';
 import { HostDetailPanel } from './SshModals.jsx';
 import { SessionHostsRail } from './SessionHostsRail.jsx';
 import { RightDrawer } from './RightDrawer.jsx';
@@ -87,6 +87,8 @@ export default function App() {
   const [navSection, setNavSection] = useState(readNavSection);
   /** @type {[null | { mode: 'add' | 'edit' | 'duplicate', snippet?: object }, Function]} */
   const [snippetDetail, setSnippetDetail] = useState(null);
+  /** @type {[null | object, Function]} */
+  const [historyDetail, setHistoryDetail] = useState(null);
   /** @type {[null | { mode: 'add' | 'edit' | 'duplicate', host?: object, sourceAlias?: string }, Function]} */
   const [hostDetail, setHostDetail] = useState(null);
   const [sessionHostsOpen, setSessionHostsOpen] = useState(() =>
@@ -1157,6 +1159,7 @@ export default function App() {
         setMainView('hosts');
       }
       if (id !== 'snippets') setSnippetDetail(null);
+      if (id !== 'history') setHistoryDetail(null);
       if (id === 'snippets' || id === 'history') setHostDetail(null);
       if (id === 'history') setSnippetDetail(null);
     },
@@ -1263,12 +1266,7 @@ export default function App() {
             title="Hosts"
           >
             <span className="tab-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14">
-                <path
-                  fill="currentColor"
-                  d="M2.5 2.5h4v4h-4v-4zm7 0h4v4h-4v-4zm-7 7h4v4h-4v-4zm7 0h4v4h-4v-4z"
-                />
-              </svg>
+              <LuLayoutGrid size={14} />
             </span>
             <span className="tab-title">Hosts</span>
           </button>
@@ -1454,10 +1452,11 @@ export default function App() {
               />
             ) : navSection === 'history' ? (
               <CommandHistoryView
-                onRun={(snippet) => {
-                  setMainView('session');
-                  // Defer so session view focuses the active pane before input.
-                  requestAnimationFrame(() => runSnippet(snippet));
+                selectedId={historyDetail?.id ?? null}
+                onSelect={(entry) => {
+                  setHostDetail(null);
+                  setSnippetDetail(null);
+                  setHistoryDetail(entry || null);
                 }}
                 onOpenTerminal={() => {
                   setMainView('session');
@@ -1681,6 +1680,21 @@ export default function App() {
                 } catch (err) {
                   alert(err instanceof Error ? err.message : String(err));
                 }
+              }}
+            />
+          )}
+
+        {mainView === 'hosts' &&
+          navSection === 'history' &&
+          historyDetail &&
+          !hostDetail && (
+            <HistoryDetailPanel
+              key={historyDetail.id}
+              entry={historyDetail}
+              onClose={() => setHistoryDetail(null)}
+              onRun={(snippet) => {
+                setMainView('session');
+                requestAnimationFrame(() => runSnippet(snippet));
               }}
             />
           )}

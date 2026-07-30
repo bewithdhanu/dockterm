@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LuCheck, LuCopy } from 'react-icons/lu';
 import {
   COMMAND_HISTORY_EVENT,
   clearCommandHistory,
@@ -32,32 +33,6 @@ function formatWhen(at) {
     hour12: true,
   });
   return `${month} ${day}, ${time}`;
-}
-
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M5.5 2A1.5 1.5 0 0 0 4 3.5v8A1.5 1.5 0 0 0 5.5 13H11a1 1 0 0 0 1-1V3.5A1.5 1.5 0 0 0 10.5 2h-5zM5 3.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V11H5.5a.5.5 0 0 1-.5-.5v-7z"
-      />
-      <path
-        fill="currentColor"
-        d="M2 5.5A1.5 1.5 0 0 1 3.5 4H4v1h-.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5H9v1H3.5A1.5 1.5 0 0 1 2 12.5v-7z"
-      />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 4.6-4.6L12.2 5.5 6.5 11.2z"
-      />
-    </svg>
-  );
 }
 
 async function copyText(text) {
@@ -196,7 +171,7 @@ export function CommandHistoryPanel({ onRun }) {
                   aria-label={copied ? 'Copied' : 'Copy command'}
                   onClick={(e) => copyCommand(entry, e)}
                 >
-                  {copied ? <CheckIcon /> : <CopyIcon />}
+                    {copied ? <LuCheck size={14} /> : <LuCopy size={14} />}
                 </button>
               </div>
             );
