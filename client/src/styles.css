@@ -116,6 +116,12 @@ body,
   min-width: 0;
 }
 
+/* Whole bar drags the window; interactive children opt out below. */
+.top-chrome.is-electron {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 /* Terminal/session: match terminal theme bg and remove the seam line. */
 .top-chrome.is-session {
   background: var(--term-bg, var(--bg));
@@ -132,13 +138,6 @@ body,
   gap: 8px;
   padding: 0 12px 0 14px;
   flex-shrink: 0;
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-
-.top-chrome:not(.is-electron) .top-chrome-brand {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .top-chrome-logo {
@@ -161,8 +160,6 @@ body,
   min-width: 0;
   display: flex;
   align-items: stretch;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .top-chrome-trailing {
@@ -170,6 +167,14 @@ body,
   display: flex;
   align-items: center;
   padding: 0 10px 0 4px;
+}
+
+/* Keep tabs, panel toggles, and window buttons clickable. */
+.top-chrome.is-electron .tab-wrap,
+.top-chrome.is-electron .home-tab,
+.top-chrome.is-electron .new-tab,
+.top-chrome.is-electron .chrome-panel-toggles,
+.top-chrome.is-electron .app-titlebar-controls {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -351,8 +356,6 @@ body,
 .app-titlebar-controls {
   display: flex;
   height: 100%;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .app-titlebar-btn {
