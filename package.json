@@ -1,0 +1,90 @@
+{
+  "name": "dockterm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DockTerm — multi-tab SSH terminal with React, xterm.js, and node-pty",
+  "author": "DockTerm",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "PATH=/opt/homebrew/opt/node@22/bin:$PATH concurrently -k -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "/opt/homebrew/opt/node@22/bin/node server/index.js",
+    "dev:client": "PATH=/opt/homebrew/opt/node@22/bin:$PATH vite --config client/vite.config.js",
+    "build": "PATH=/opt/homebrew/opt/node@22/bin:$PATH vite build --config client/vite.config.js",
+    "start": "NODE_ENV=production /opt/homebrew/opt/node@22/bin/node server/index.js",
+    "desktop": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "express": "^4.21.2",
+    "monaco-editor": "^0.56.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.15.3",
+    "vite": "^6.0.7"
+  },
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "build": {
+    "appId": "app.dockterm.desktop",
+    "productName": "DockTerm",
+    "copyright": "Copyright © DockTerm",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "client/dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      "build/icon.png",
+      "build/icon.icns",
+      "package.json"
+    ],
+    "asar": false,
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "TerminalEmulator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
