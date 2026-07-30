@@ -24,6 +24,18 @@ const ITEMS = [
     ),
   },
   {
+    id: 'history',
+    label: 'History',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M13 3a9 9 0 1 0 8.94 8H20a7 7 0 1 1-2.05-4.95L15 9h6V3l-2.12 2.12A8.96 8.96 0 0 0 13 3zm-1 5v5l4.2 2.5.8-1.3-3.5-2.1V8H12z"
+        />
+      </svg>
+    ),
+  },
+  {
     id: 'config',
     label: 'Config',
     icon: (

@@ -10,6 +10,7 @@ import {
   nextCopySnippetName,
   notifySnippetsChanged,
 } from './SnippetsView.jsx';
+import { CommandHistoryView } from './CommandHistoryView.jsx';
 import { HostDetailPanel } from './SshModals.jsx';
 import { SessionHostsRail } from './SessionHostsRail.jsx';
 import { RightDrawer } from './RightDrawer.jsx';
@@ -23,6 +24,7 @@ import {
   TERM_THEME_EVENT,
   syncAppChromeForView,
 } from './terminalThemes.js';
+import { appendCommandHistory } from './commandHistory.js';
 
 const SSH_CONFIG_TAB_ID = 'editor:ssh-config';
 const NAV_KEY = 'dockterm.nav-section';
@@ -31,7 +33,7 @@ const SESSION_SNIPPETS_KEY = 'dockterm.session-snippets-open';
 
 function readNavSection() {
   const v = localStorage.getItem(NAV_KEY);
-  if (v === 'hosts' || v === 'snippets') return v;
+  if (v === 'hosts' || v === 'snippets' || v === 'history') return v;
   return 'hosts';
 }
 
@@ -1132,6 +1134,11 @@ export default function App() {
       let data = String(snippet.command || '').replace(/\r\n/g, '\n');
       if (!data.trim()) return;
       if (!data.endsWith('\n')) data += '\n';
+      appendCommandHistory({
+        command: data.replace(/\n$/, ''),
+        where: pane.ssh || (pane.kind === 'ssh' ? tab.title : null) || 'Local',
+        cwd: pane.cwd || null,
+      });
       send({ type: 'input', id: pane.id, data });
     },
     [send]
@@ -1145,12 +1152,13 @@ export default function App() {
         return;
       }
       setNavSection(id);
-      localStorage.setItem(NAV_KEY, id === 'snippets' ? 'snippets' : 'hosts');
-      if (id === 'hosts' || id === 'snippets') {
+      if (id === 'hosts' || id === 'snippets' || id === 'history') {
+        localStorage.setItem(NAV_KEY, id);
         setMainView('hosts');
       }
       if (id !== 'snippets') setSnippetDetail(null);
-      if (id === 'snippets') setHostDetail(null);
+      if (id === 'snippets' || id === 'history') setHostDetail(null);
+      if (id === 'history') setSnippetDetail(null);
     },
     [openConfigEditor]
   );
@@ -1380,7 +1388,11 @@ export default function App() {
       <div className="workspace">
         {mainView === 'hosts' ? (
           <NavRail
-            active={navSection === 'snippets' ? 'snippets' : 'hosts'}
+            active={
+              navSection === 'snippets' || navSection === 'history'
+                ? navSection
+                : 'hosts'
+            }
             onSelect={selectNav}
           />
         ) : sessionHostsOpen ? (
@@ -1433,6 +1445,19 @@ export default function App() {
                       ? null
                       : cur
                   );
+                }}
+                onOpenTerminal={() => {
+                  setMainView('session');
+                  addTab();
+                }}
+                onOpenConfig={openConfigAndShow}
+              />
+            ) : navSection === 'history' ? (
+              <CommandHistoryView
+                onRun={(snippet) => {
+                  setMainView('session');
+                  // Defer so session view focuses the active pane before input.
+                  requestAnimationFrame(() => runSnippet(snippet));
                 }}
                 onOpenTerminal={() => {
                   setMainView('session');

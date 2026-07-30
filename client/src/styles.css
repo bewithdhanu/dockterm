@@ -1489,22 +1489,24 @@ body,
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
-  width: min(440px, calc(100% - 28px));
-  max-height: min(52%, 340px);
+  width: min(420px, calc(100% - 28px));
+  max-height: min(70%, 420px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 14px 16px 13px;
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.28),
+    0 14px 36px rgba(0, 0, 0, 0.32),
     0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
   pointer-events: auto;
   color: var(--text);
+  overflow: auto;
+  scrollbar-width: thin;
 }
 
 .ssh-connect-toast.mode-error {
@@ -1524,17 +1526,22 @@ body,
   border-color: color-mix(in srgb, #eab308 35%, var(--border));
 }
 
-.ssh-connect-toast-header {
+.ssh-connect-toast.mode-auth {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.ssh-connect-toast-top {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
 }
 
-.ssh-connect-toast-title {
-  font-size: 12.5px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
+.ssh-connect-host {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text);
   min-width: 0;
   overflow: hidden;
@@ -1542,58 +1549,233 @@ body,
   white-space: nowrap;
 }
 
-.ssh-connect-toast-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent, #eab308);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #eab308) 25%, transparent);
+.ssh-connect-toast-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
-  animation: ssh-connect-pulse 1.4s ease-in-out infinite;
 }
 
-.ssh-connect-toast.mode-connecting .ssh-connect-toast-dot,
-.ssh-connect-toast.mode-retry .ssh-connect-toast-dot,
-.ssh-connect-toast.mode-auth .ssh-connect-toast-dot {
-  background: #eab308;
-  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.22);
+.ssh-connect-toast-elapsed {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2, var(--bg-elevated)) 80%, transparent);
+  border: 1px solid var(--border);
 }
 
-.ssh-connect-toast.mode-confirm .ssh-connect-toast-dot {
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-  animation: none;
+.ssh-connect-pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 8px 0;
+  box-sizing: border-box;
 }
 
-.ssh-connect-toast.mode-error .ssh-connect-toast-dot {
-  background: var(--danger, #f44747);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger, #f44747) 25%, transparent);
-  animation: none;
+.ssh-connect-pipeline-item {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
-@keyframes ssh-connect-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.85);
-  }
+.ssh-connect-pipeline-item:first-child {
+  flex: 0 0 auto;
 }
 
-.ssh-connect-toast-detail {
+.ssh-connect-pipeline-line {
+  position: relative;
+  flex: 1 1 auto;
+  height: 3px;
+  margin: 0 6px;
+  border-radius: 999px;
+  background: #5a6170;
+  min-width: 16px;
+  overflow: hidden;
+}
+
+.ssh-connect-pipeline-line-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--ok, #6a9955);
+  transition: none;
+}
+
+.ssh-connect-pipeline-circle {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 3px solid #5a6170;
+  background: color-mix(in srgb, #5a6170 22%, var(--panel));
+  color: #8b93a3;
+  display: grid;
+  place-items: center;
+  transition:
+    border-color 0.35s ease,
+    background 0.35s ease,
+    color 0.35s ease,
+    opacity 0.35s ease,
+    transform 0.35s ease;
+}
+
+.ssh-connect-pipeline-circle.pending {
+  border-color: #5a6170;
+  background: color-mix(in srgb, #5a6170 18%, var(--panel));
+  color: #8b93a3;
+  opacity: 1;
+}
+
+.ssh-connect-pipeline-circle.active {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--warn, #eab308) 18%, var(--panel));
+  color: var(--warn, #eab308);
+  transform: scale(1.08);
+  opacity: 1;
+}
+
+.ssh-connect-pipeline-circle.active .ssh-connect-pipeline-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--warn, #eab308);
+  border-right-color: color-mix(in srgb, var(--warn, #eab308) 40%, transparent);
+  animation: ssh-connect-spin 0.85s linear infinite;
+}
+
+.ssh-connect-pipeline-circle.done {
+  border-color: var(--ok, #6a9955);
+  background: color-mix(in srgb, var(--ok, #6a9955) 22%, var(--panel));
+  color: var(--ok, #6a9955);
+  opacity: 1;
+}
+
+.ssh-connect-pipeline-circle.error {
+  border-color: var(--danger, #f44747);
+  background: color-mix(in srgb, var(--danger, #f44747) 20%, var(--panel));
+  color: var(--danger, #f44747);
+  opacity: 1;
+}
+
+.ssh-connect-pipeline-check {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ssh-connect-stage-label {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+  margin-top: -4px;
+}
+
+.ssh-connect-toast-facts {
   margin: 0;
-  max-height: 160px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ssh-connect-toast-fact {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ssh-connect-toast-fact dt {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.ssh-connect-toast-fact dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-connect-toast-fact dd.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.ssh-connect-toast-log-wrap {
+  position: relative;
+  min-height: 0;
+}
+
+.ssh-connect-toast-log-wrap.has-copy .ssh-connect-toast-log {
+  padding-top: 28px;
+}
+
+.ssh-connect-toast-log-copy {
+  appearance: none;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ssh-connect-toast-log-copy:hover {
+  color: var(--text);
+  background: var(--panel-2, var(--bg-elevated));
+}
+
+.ssh-connect-toast-log-copy.copied {
+  color: var(--ok, #6a9955);
+}
+
+.ssh-connect-toast-log {
+  margin: 0;
+  max-height: 110px;
   overflow: auto;
-  font-family: "SF Mono", Menlo, Monaco, ui-monospace, monospace;
+  padding: 8px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--muted);
   white-space: pre-wrap;
   word-break: break-word;
   scrollbar-width: thin;
+}
+
+@keyframes ssh-connect-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ssh-connect-toast-actions {
@@ -1609,9 +1791,9 @@ body,
   background: var(--panel-2, var(--bg-elevated));
   color: var(--text);
   border-radius: 8px;
-  padding: 5px 11px;
+  padding: 6px 12px;
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   pointer-events: auto;
@@ -1622,7 +1804,6 @@ body,
 }
 
 .ssh-connect-toast-btn.quiet {
-  margin-left: auto;
   font-weight: 550;
   color: var(--muted);
 }
@@ -1636,12 +1817,6 @@ body,
 .ssh-connect-toast-btn.danger {
   border-color: color-mix(in srgb, var(--danger, #f44747) 35%, var(--border));
   color: color-mix(in srgb, var(--danger, #f44747) 80%, var(--text));
-}
-
-.ssh-connect-toast-hint {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.35;
 }
 
 .split-pane-close {
@@ -2843,6 +3018,533 @@ body.split-dragging-row * {
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
+}
+
+.cmd-history-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cmd-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cmd-history-clear {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cmd-history-clear:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--danger, #f44747) 40%, var(--border));
+}
+
+.cmd-history-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.cmd-history-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+}
+
+.cmd-history-row {
+  position: relative;
+}
+
+.cmd-history-run {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  padding-right: 28px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.cmd-history-copy {
+  appearance: none;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.cmd-history-row:hover .cmd-history-copy,
+.cmd-history-copy:focus-visible,
+.cmd-history-copy.copied {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cmd-history-copy:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 70%, var(--border));
+}
+
+.cmd-history-copy.copied {
+  color: var(--ok, #6a9955);
+}
+
+.cmd-history-card {
+  position: relative;
+  padding: 0;
+  overflow: visible;
+  align-items: flex-start;
+}
+
+.cmd-history-card-run {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  padding-right: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.cmd-history-card .host-card-main {
+  align-items: flex-start;
+}
+
+.cmd-history-card .host-card-body {
+  padding-right: 0;
+}
+
+.cmd-history-card .cmd-history-copy {
+  top: 12px;
+  right: 12px;
+}
+
+.cmd-history-card:hover .cmd-history-copy,
+.cmd-history-card .cmd-history-copy:focus-visible,
+.cmd-history-card .cmd-history-copy.copied {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Responsive: 2 per row, 3 when wide enough. */
+.cmd-history-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (min-width: 1280px) {
+  .cmd-history-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .cmd-history-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cmd-history-filters {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cmd-history-filter {
+  min-width: 140px;
+  max-width: 200px;
+}
+
+.hist-filter {
+  position: relative;
+  min-width: 148px;
+  max-width: 220px;
+}
+
+.hist-filter-trigger {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.hist-filter-trigger:hover {
+  background: var(--panel-2);
+}
+
+.hist-filter.open .hist-filter-trigger {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.hist-filter-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hist-filter-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.hist-filter.open .hist-filter-chevron {
+  transform: rotate(180deg);
+}
+
+.hist-filter-menu {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 4px);
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+}
+
+.hist-host-menu {
+  width: min(260px, 70vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hist-host-search {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.hist-host-search:focus {
+  border-color: var(--accent);
+}
+
+.hist-filter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+}
+
+.hist-filter-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.hist-filter-option {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hist-filter-option:hover {
+  background: var(--panel-2);
+}
+
+.hist-filter-option.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.hist-filter-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hist-calendar {
+  width: 268px;
+  padding: 10px;
+}
+
+.hist-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.hist-cal-month {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.hist-cal-nav {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hist-cal-nav:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.hist-cal-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.hist-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.hist-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.hist-cal-day {
+  appearance: none;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hist-cal-day.empty {
+  pointer-events: none;
+}
+
+.hist-cal-day:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.hist-cal-day.today:not(.selected) {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.hist-cal-day.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.hist-cal-day:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.hist-cal-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.hist-cal-clear {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+.hist-cal-clear:hover {
+  color: var(--text);
+}
+
+.cmd-history-cmd-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.cmd-history-meta-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.cmd-history-meta-host,
+.cmd-history-meta-when {
+  flex-shrink: 0;
+}
+
+.cmd-history-meta-sep {
+  flex-shrink: 0;
+  margin: 0 0.35em;
+  opacity: 0.7;
+}
+
+/* Leading ellipsis on the path when space runs out (LTR, measured). */
+.cmd-history-meta-path {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.cmd-history-meta-path-visible {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cmd-history-meta-path-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.cmd-history-row .snippet-row-name.cmd-history-cmd-text {
+  font-size: 12.5px;
+  display: block;
+}
+
+.cmd-history-row .cmd-history-meta-line {
+  font-size: 11px;
+}
+
+.cmd-history-card .host-card-body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cmd-history-card .host-card-main {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .themes-panel-header {

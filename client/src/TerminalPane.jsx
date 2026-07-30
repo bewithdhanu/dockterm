@@ -12,6 +12,7 @@ import {
   getTermTheme,
   getTermFontSize,
 } from './terminalThemes.js';
+import { appendCommandHistory } from './commandHistory.js';
 
 function stripAnsi(text) {
   return String(text || '')
@@ -33,21 +34,155 @@ function lastMeaningfulLines(text, max = 4) {
   return lines.slice(-max).join('\n');
 }
 
+function parseHostKeyInfo(plain) {
+  const hostMatch = plain.match(
+    /authenticity of host ['"]([^'"]+)['"]\s*(?:\(([^)]+)\))?/i
+  );
+  const keyMatch = plain.match(
+    /(ED25519|RSA|ECDSA|DSA)\s+key fingerprint is\s+(\S+)/i
+  );
+  const algoMatch = plain.match(
+    /(?:Offering|Server host key):\s*([^\r\n]+)/i
+  );
+  return {
+    target: hostMatch?.[1] || null,
+    address: hostMatch?.[2] || null,
+    keyType: keyMatch?.[1] || null,
+    fingerprint: keyMatch?.[2] || null,
+    keyOffer: algoMatch?.[1]?.trim() || null,
+  };
+}
+
+function classifyConnectError(plain) {
+  const lower = String(plain || '').toLowerCase();
+  if (/permission denied|authentication failed|too many authentication/i.test(lower)) {
+    return {
+      label: 'Authentication failed',
+      summary: 'Credentials were rejected by the remote host.',
+    };
+  }
+  if (/connection refused/i.test(lower)) {
+    return {
+      label: 'Connection refused',
+      summary: 'Nothing is accepting SSH on that host/port.',
+    };
+  }
+  if (/timed out|timeout/i.test(lower)) {
+    return {
+      label: 'Timed out',
+      summary: 'The host did not respond in time.',
+    };
+  }
+  if (/could not resolve|name or service not known|nodename nor servname/i.test(lower)) {
+    return {
+      label: 'Host not found',
+      summary: 'DNS could not resolve that hostname.',
+    };
+  }
+  if (/no route to host|network is unreachable/i.test(lower)) {
+    return {
+      label: 'Unreachable',
+      summary: 'No network path to the remote host.',
+    };
+  }
+  if (/host key verification failed/i.test(lower)) {
+    return {
+      label: 'Host key mismatch',
+      summary: 'The remote key does not match known_hosts.',
+    };
+  }
+  return {
+    label: 'Connection failed',
+    summary: 'SSH could not complete the session.',
+  };
+}
+
+function inferConnectStep(plain, opts = {}) {
+  if (opts.hostKeyAnswered) return 3;
+  const lower = String(plain || '').toLowerCase();
+  if (/password:|passphrase for|verification code:|authenticated to|auth succeeded/i.test(lower)) {
+    return 3;
+  }
+  if (
+    /authenticity of host|are you sure you want to continue|connecting to|connection established|banner/i.test(
+      lower
+    )
+  ) {
+    return 2;
+  }
+  if (plain && plain.trim()) return 1;
+  return 0;
+}
+
+const CONNECT_STEPS = [
+  {
+    id: 'resolve',
+    label: 'Resolve host',
+    log: 'Resolving hostname and reading SSH config…',
+  },
+  {
+    id: 'tcp',
+    label: 'Open connection',
+    log: 'Opening a TCP connection to the remote SSH service…',
+  },
+  {
+    id: 'verify',
+    label: 'Verify host key',
+    log: 'Checking the remote host key against known_hosts…',
+  },
+  {
+    id: 'auth',
+    label: 'Authenticate',
+    log: 'Negotiating encryption and authenticating…',
+  },
+];
+
+function stageLogForProgress(steps, progress) {
+  if (!steps?.length) return null;
+  const i = Math.min(
+    Math.max(Math.floor(progress), 0),
+    steps.length - 1
+  );
+  return steps[i]?.log || steps[i]?.label || null;
+}
+
 /**
- * Derive a compact banner from diverted SSH connect output.
- * Host-key / password prompts surface as structured UI instead of a full-screen log.
+ * Derive a rich banner from diverted SSH connect output.
  */
 function deriveSshBanner(text, mode, host, opts = {}) {
   const plain = String(text || '');
   const lower = plain.toLowerCase();
+  const hostKeyInfo = parseHostKeyInfo(plain);
+  const displayHost = host || hostKeyInfo.target || 'remote';
+  const facts = [];
+
+  if (host || hostKeyInfo.target) {
+    facts.push({ label: 'Host', value: host || hostKeyInfo.target });
+  }
+  if (hostKeyInfo.address) {
+    facts.push({ label: 'Address', value: hostKeyInfo.address });
+  }
+  if (hostKeyInfo.keyType) {
+    facts.push({ label: 'Key type', value: hostKeyInfo.keyType });
+  }
+  if (hostKeyInfo.fingerprint) {
+    facts.push({ label: 'Fingerprint', value: hostKeyInfo.fingerprint, mono: true });
+  }
 
   if (mode === 'error') {
+    const err = classifyConnectError(plain);
     return {
       kind: 'error',
-      title: host ? `SSH failed · ${host}` : 'SSH failed',
-      detail:
-        lastMeaningfulLines(plain, 5) || 'Connection failed.',
+      status: 'Failed',
+      title: err.label,
+      subtitle: displayHost,
+      summary: err.summary,
+      detail: lastMeaningfulLines(plain, 6) || null,
+      facts,
+      steps: CONNECT_STEPS,
+      stepIndex: CONNECT_STEPS.length - 1,
       confirm: null,
+      hint: 'Tab kept open — dismiss to read the terminal, or close the tab.',
     };
   }
 
@@ -56,38 +191,35 @@ function deriveSshBanner(text, mode, host, opts = {}) {
     /authenticity of host .+ can'?t be established/i.test(plain);
 
   if (hostKey) {
-    const authenticity = plain.match(
-      /The authenticity of host[\s\S]*?(?=Are you sure|$)/i
-    );
-    const fingerprint = plain.match(
-      /(?:ED25519|RSA|ECDSA|DSA)\s+key fingerprint is\s+\S+/i
-    );
-    const detail = [
-      authenticity?.[0]?.trim(),
-      fingerprint && !authenticity?.[0]?.includes(fingerprint[0])
-        ? fingerprint[0]
-        : null,
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-      .trim();
-
     if (opts.hostKeyAnswered) {
       return {
         kind: 'connecting',
-        title: host ? `Connecting · ${host}` : 'Connecting…',
-        detail: 'Host key accepted — finishing sign-in…',
+        status: 'Connecting',
+        title: 'Finishing sign-in',
+        subtitle: displayHost,
+        summary: 'Host key accepted. Completing authentication…',
+        detail: null,
+        facts,
+        steps: CONNECT_STEPS,
+        stepIndex: 3,
         confirm: null,
+        hint: null,
       };
     }
 
     return {
       kind: 'confirm',
+      status: 'New host',
       title: 'Trust this host?',
-      detail:
-        detail ||
-        'This host is not in your known_hosts allow list yet.',
+      subtitle: displayHost,
+      summary:
+        'This host is not in your known_hosts allow list yet. Confirm the fingerprint before continuing.',
+      detail: null,
+      facts,
+      steps: CONNECT_STEPS,
+      stepIndex: 2,
       confirm: 'hostkey',
+      hint: 'Only continue if you recognize this machine and fingerprint.',
     };
   }
 
@@ -96,15 +228,33 @@ function deriveSshBanner(text, mode, host, opts = {}) {
     /passphrase for/i.test(plain) ||
     /verification code:/i.test(plain)
   ) {
+    const authKind = /passphrase/i.test(plain)
+      ? 'passphrase'
+      : /verification code/i.test(plain)
+        ? 'otp'
+        : 'password';
     return {
       kind: 'auth',
-      title: host ? `Sign in · ${host}` : 'Authentication',
-      detail: /passphrase/i.test(plain)
-        ? 'Enter your key passphrase…'
-        : /verification code/i.test(plain)
-          ? 'Enter the verification code…'
-          : 'Enter your password…',
+      status: 'Authentication',
+      title:
+        authKind === 'passphrase'
+          ? 'Key passphrase required'
+          : authKind === 'otp'
+            ? 'Verification code required'
+            : 'Password required',
+      subtitle: displayHost,
+      summary:
+        authKind === 'passphrase'
+          ? 'Enter the passphrase for your private key.'
+          : authKind === 'otp'
+            ? 'Enter the one-time verification code.'
+            : 'Enter your SSH password in the terminal.',
+      detail: null,
+      facts,
+      steps: CONNECT_STEPS,
+      stepIndex: 3,
       confirm: null,
+      hint: 'Type directly in the terminal — input is not echoed here.',
     };
   }
 
@@ -113,19 +263,40 @@ function deriveSshBanner(text, mode, host, opts = {}) {
       lower
     )
   ) {
+    const err = classifyConnectError(plain);
     return {
       kind: 'retry',
-      title: host ? `Retrying · ${host}` : 'Retrying…',
-      detail: lastMeaningfulLines(plain, 3) || 'Waiting to reconnect…',
+      status: 'Retrying',
+      title: err.label,
+      subtitle: displayHost,
+      summary: err.summary,
+      detail: lastMeaningfulLines(plain, 4) || null,
+      facts,
+      steps: CONNECT_STEPS,
+      stepIndex: inferConnectStep(plain, opts),
       confirm: null,
+      hint: 'Still trying to reach the remote host…',
     };
   }
 
+  const stepIndex = inferConnectStep(plain, opts);
   return {
     kind: 'connecting',
-    title: host ? `Connecting · ${host}` : 'Connecting…',
-    detail: lastMeaningfulLines(plain, 2) || 'Establishing SSH session…',
+    status: 'Connecting',
+    title: 'Establishing SSH session',
+    subtitle: displayHost,
+    // Summary is driven by visual pipeline progress in the UI.
+    summary: null,
+    detail: lastMeaningfulLines(plain, 3) || null,
+    facts: facts.length
+      ? facts
+      : host
+        ? [{ label: 'Host', value: host }]
+        : [],
+    steps: CONNECT_STEPS,
+    stepIndex,
     confirm: null,
+    hint: null,
   };
 }
 
@@ -151,6 +322,70 @@ function applyConnectingCursor(term, connecting) {
   }
 }
 
+/**
+ * Feed typed PTY input into a line buffer; return committed commands on Enter.
+ * Skips CSI/SS3 sequences so arrow keys don't corrupt the buffer.
+ */
+function feedTypedLine(buf, data) {
+  let line = String(buf || '');
+  const committed = [];
+  let i = 0;
+  const s = String(data || '');
+
+  while (i < s.length) {
+    const ch = s[i];
+
+    if (ch === '\x1b') {
+      i += 1;
+      if (s[i] === '[') {
+        i += 1;
+        while (i < s.length && !/[A-Za-z~]/.test(s[i])) i += 1;
+        i += 1;
+      } else if (s[i] === 'O') {
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (ch === '\r' || ch === '\n') {
+      if (line.trim()) committed.push(line);
+      line = '';
+      i += 1;
+      if (ch === '\r' && s[i] === '\n') i += 1;
+      continue;
+    }
+
+    if (ch === '\x7f' || ch === '\b') {
+      line = line.slice(0, -1);
+      i += 1;
+      continue;
+    }
+
+    if (ch === '\x03' || ch === '\x15') {
+      // Ctrl-C / Ctrl-U — discard partial line
+      line = '';
+      i += 1;
+      continue;
+    }
+
+    if (ch === '\x17') {
+      // Ctrl-W — delete last word
+      line = line.replace(/\s*\S*$/, '');
+      i += 1;
+      continue;
+    }
+
+    if (ch === '\t' || ch >= ' ') {
+      line += ch;
+    }
+    i += 1;
+  }
+
+  return { line, committed };
+}
+
 export function TerminalPane({
   id,
   active,
@@ -160,6 +395,7 @@ export function TerminalPane({
   registerSerializer,
   onTitle,
   onCwd,
+  onClose,
   initialScrollback,
   isSsh = false,
   sshStatus = null,
@@ -176,6 +412,9 @@ export function TerminalPane({
   const initialScrollbackRef = useRef(initialScrollback);
   const hasHistoryRef = useRef(Boolean(initialScrollback));
   const sshStatusRef = useRef(sshStatus);
+  const sshHostRef = useRef(sshHost);
+  const cwdRef = useRef(null);
+  const typedLineRef = useRef('');
   const connectLogRef = useRef('');
   const divertRef = useRef(Boolean(isSsh && sshStatus === 'connecting'));
   const finishedConnectRef = useRef(sshStatus === 'connected');
@@ -192,12 +431,21 @@ export function TerminalPane({
   setOverlayRef.current = setOverlay;
   const overlayDismissedRef = useRef(false);
   const [hostKeyAnswered, setHostKeyAnswered] = useState(false);
+  const [connectStartedAt, setConnectStartedAt] = useState(() =>
+    isSsh && sshStatus === 'connecting' ? Date.now() : null
+  );
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [pipelineProgress, setPipelineProgress] = useState(0);
+  const pipelineProgressRef = useRef(0);
+  const [logCopied, setLogCopied] = useState(false);
+  const logCopiedTimerRef = useRef(null);
 
   onTitleRef.current = onTitle;
   onCwdRef.current = onCwd;
   sendRef.current = send;
   activeRef.current = active;
   sshStatusRef.current = sshStatus;
+  sshHostRef.current = sshHost;
 
   // Keep divert flag in sync with SSH lifecycle.
   useEffect(() => {
@@ -210,6 +458,10 @@ export function TerminalPane({
       finishedConnectRef.current = false;
       overlayDismissedRef.current = false;
       setHostKeyAnswered(false);
+      setConnectStartedAt(Date.now());
+      setElapsedSec(0);
+      pipelineProgressRef.current = 0;
+      setPipelineProgress(0);
       applyConnectingCursor(termRef.current, true);
       try {
         termRef.current?.blur();
@@ -223,7 +475,12 @@ export function TerminalPane({
       });
     } else if (sshStatus === 'error') {
       divertRef.current = false;
-      applyConnectingCursor(termRef.current, false);
+      applyConnectingCursor(termRef.current, true);
+      try {
+        termRef.current?.blur();
+      } catch {
+        /* ignore */
+      }
       if (!overlayDismissedRef.current) {
         setOverlay({
           mode: 'error',
@@ -235,6 +492,7 @@ export function TerminalPane({
       finishedConnectRef.current = true;
       divertRef.current = false;
       applyConnectingCursor(termRef.current, false);
+      setConnectStartedAt(null);
       const term = termRef.current;
       const raw = connectLogRef.current;
       const prompt = lastPromptLine(raw);
@@ -260,6 +518,7 @@ export function TerminalPane({
       }
     } else if (sshStatus === 'connected') {
       applyConnectingCursor(termRef.current, false);
+      setConnectStartedAt(null);
     }
   }, [isSsh, sshStatus, sshHost, id]);
 
@@ -270,7 +529,11 @@ export function TerminalPane({
 
     applyTermBgCssVar();
 
-    const connecting = Boolean(isSsh && sshStatusRef.current === 'connecting');
+    const connecting = Boolean(
+      isSsh &&
+        (sshStatusRef.current === 'connecting' ||
+          sshStatusRef.current === 'error')
+    );
     const baseTheme = getTermTheme();
     const hideCursorTheme = connecting
       ? {
@@ -323,6 +586,25 @@ export function TerminalPane({
 
     const dataDisp = term.onData((data) => {
       sendRef.current({ type: 'input', id, data });
+
+      // Don't record while SSH is still handshaking (password / host key noise).
+      if (divertRef.current || sshStatusRef.current === 'connecting') {
+        typedLineRef.current = '';
+        return;
+      }
+
+      const { line, committed } = feedTypedLine(typedLineRef.current, data);
+      typedLineRef.current = line;
+      const where = isSsh
+        ? sshHostRef.current || 'SSH'
+        : 'Local';
+      for (const command of committed) {
+        appendCommandHistory({
+          command,
+          where,
+          cwd: cwdRef.current,
+        });
+      }
     });
 
     const titleDisp = term.onTitleChange((title) => {
@@ -338,6 +620,7 @@ export function TerminalPane({
             let cwd = decodeURIComponent(url.pathname || '');
             if (/^\/[A-Za-z]:\//.test(cwd)) cwd = cwd.slice(1);
             if (cwd) {
+              cwdRef.current = cwd;
               onCwdRef.current?.(cwd);
               sendRef.current({ type: 'cwd', id, cwd });
             }
@@ -439,7 +722,11 @@ export function TerminalPane({
 
       fitAndResize();
       // Don't focus while SSH is still connecting — avoids a blinking empty cursor.
-      if (activeRef.current && sshStatusRef.current !== 'connecting') {
+      if (
+        activeRef.current &&
+        sshStatusRef.current !== 'connecting' &&
+        sshStatusRef.current !== 'error'
+      ) {
         term.focus();
       }
     };
@@ -472,7 +759,9 @@ export function TerminalPane({
         const theme = e?.detail?.theme || getTermTheme();
         const fontSize = e?.detail?.fontSize || getTermFontSize();
         const connecting =
-          isSsh && sshStatusRef.current === 'connecting';
+          isSsh &&
+          (sshStatusRef.current === 'connecting' ||
+            sshStatusRef.current === 'error');
         const bg = theme.background || '#000000';
         term.options.theme = connecting
           ? { ...theme, cursor: bg, cursorAccent: bg }
@@ -522,8 +811,8 @@ export function TerminalPane({
 
   useEffect(() => {
     if (!active) return;
-    // Keep focus off the empty PTY while connecting (password auth re-focuses later).
-    if (isSsh && sshStatus === 'connecting') return;
+    // Keep focus off the empty PTY while connecting or after a failed connect.
+    if (isSsh && (sshStatus === 'connecting' || sshStatus === 'error')) return;
     const term = termRef.current;
     if (!term) return;
     const frame = requestAnimationFrame(() => {
@@ -541,6 +830,75 @@ export function TerminalPane({
         hostKeyAnswered,
       })
     : null;
+
+  useEffect(() => {
+    if (!overlay || !connectStartedAt) return undefined;
+    if (overlay.mode === 'error') return undefined;
+    const tick = () => {
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - connectStartedAt) / 1000)));
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [overlay, connectStartedAt, overlay?.mode]);
+
+  // Smooth pipeline progress: glide through stages (~550ms each) instead of jumping.
+  useEffect(() => {
+    if (!overlay || !banner?.steps?.length) return undefined;
+
+    if (banner.kind === 'error') {
+      pipelineProgressRef.current = banner.steps.length;
+      setPipelineProgress(banner.steps.length);
+      return undefined;
+    }
+
+    const STAGE_MS = 550;
+    const MAX_HOLD = banner.steps.length - 0.12; // keep last circle spinning
+    let raf = 0;
+    let last = performance.now();
+
+    const loop = (now) => {
+      const dt = Math.min(64, now - last);
+      last = now;
+      const elapsed = Date.now() - (connectStartedAt || Date.now());
+
+      let target;
+      if (banner.kind === 'confirm') {
+        // Reach verify stage smoothly, then hold there.
+        target = Math.min(2, elapsed / STAGE_MS);
+        if (banner.stepIndex >= 2) target = 2;
+      } else if (banner.kind === 'auth') {
+        target = Math.min(MAX_HOLD, Math.max(3, elapsed / STAGE_MS));
+      } else {
+        const timed = elapsed / STAGE_MS;
+        target = Math.max(timed, banner.stepIndex || 0);
+        target = Math.min(MAX_HOLD, target);
+      }
+
+      let cur = pipelineProgressRef.current;
+      if (cur < target) {
+        // Constant-ish speed so each stage is visible (~1 unit / STAGE_MS).
+        cur = Math.min(target, cur + dt / STAGE_MS);
+      } else if (cur > target + 0.001) {
+        cur = Math.max(target, cur - dt / (STAGE_MS * 0.6));
+      } else {
+        cur = target;
+      }
+
+      pipelineProgressRef.current = cur;
+      setPipelineProgress(cur);
+      raf = requestAnimationFrame(loop);
+    };
+
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [
+    overlay,
+    banner?.kind,
+    banner?.stepIndex,
+    banner?.steps?.length,
+    connectStartedAt,
+  ]);
 
   // Focus when password / OTP is needed so the user can type without clicking.
   useEffect(() => {
@@ -566,10 +924,79 @@ export function TerminalPane({
     }
   };
 
+  const formatElapsed = (sec) => {
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${String(s).padStart(2, '0')}s`;
+  };
+
+  const visualStepIndex = banner?.steps?.length
+    ? Math.min(
+        Math.max(Math.floor(pipelineProgress), 0),
+        banner.steps.length - 1
+      )
+    : 0;
+
+  const stageLog = stageLogForProgress(banner?.steps, pipelineProgress);
+
+  // Stage copy follows the animated circles. Real SSH lines (when any) append under it.
+  // Failed / auth / host-key keep their own richer messages.
+  const logText = (() => {
+    if (!banner) return 'Waiting for remote…';
+    if (banner.kind === 'error') {
+      return (
+        banner.detail ||
+        banner.summary ||
+        overlay?.text?.trim() ||
+        'Connection failed.'
+      );
+    }
+    if (banner.kind === 'confirm' || banner.kind === 'auth') {
+      return (
+        banner.summary ||
+        banner.detail ||
+        stageLog ||
+        overlay?.text?.trim() ||
+        'Waiting for remote…'
+      );
+    }
+    const sshLines = banner.detail?.trim();
+    if (stageLog && sshLines && !sshLines.includes(stageLog)) {
+      return `${stageLog}\n${sshLines}`;
+    }
+    return stageLog || sshLines || banner.summary || 'Waiting for remote…';
+  })();
+
+  const copyLog = async () => {
+    const value = String(logText || '');
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        return;
+      }
+    }
+    setLogCopied(true);
+    if (logCopiedTimerRef.current) clearTimeout(logCopiedTimerRef.current);
+    logCopiedTimerRef.current = setTimeout(() => setLogCopied(false), 1200);
+  };
+
   return (
     <div
       className={`terminal-host-wrap${
-        isSsh && sshStatus === 'connecting' ? ' is-connecting' : ''
+        isSsh && (sshStatus === 'connecting' || sshStatus === 'error')
+          ? ' is-connecting'
+          : ''
       }`}
     >
       <div className="terminal-host" ref={containerRef} />
@@ -579,25 +1006,151 @@ export function TerminalPane({
           role="status"
           aria-live="polite"
         >
-          <div className="ssh-connect-toast-header">
-            <span className="ssh-connect-toast-dot" />
-            <span className="ssh-connect-toast-title">{banner.title}</span>
-            {overlay.mode === 'error' ? (
+          <div className="ssh-connect-toast-top">
+            <div className="ssh-connect-host" title={banner.subtitle || ''}>
+              {banner.subtitle || banner.title}
+            </div>
+            <div className="ssh-connect-toast-top-right">
+              {overlay.mode !== 'error' && connectStartedAt ? (
+                <span className="ssh-connect-toast-elapsed">
+                  {formatElapsed(elapsedSec)}
+                </span>
+              ) : null}
+              {overlay.mode === 'error' ? (
+                <button
+                  type="button"
+                  className="ssh-connect-toast-btn quiet"
+                  onClick={() => {
+                    overlayDismissedRef.current = true;
+                    setOverlay(null);
+                    onClose?.();
+                  }}
+                >
+                  Close
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {banner.steps ? (
+            <div className="ssh-connect-pipeline" aria-label="Connection progress">
+              {banner.steps.map((step, i) => {
+                const p = pipelineProgress;
+                const state =
+                  banner.kind === 'error'
+                    ? i < banner.steps.length - 1
+                      ? 'done'
+                      : 'error'
+                    : p >= i + 1
+                      ? 'done'
+                      : p >= i
+                        ? 'active'
+                        : 'pending';
+                const lineFill =
+                  banner.kind === 'error'
+                    ? 100
+                    : Math.max(0, Math.min(100, (p - (i - 1)) * 100));
+                return (
+                  <div key={step.id} className="ssh-connect-pipeline-item">
+                    {i > 0 ? (
+                      <span
+                        className="ssh-connect-pipeline-line"
+                        aria-hidden="true"
+                      >
+                        <span
+                          className="ssh-connect-pipeline-line-fill"
+                          style={{ width: `${lineFill}%` }}
+                        />
+                      </span>
+                    ) : null}
+                    <span
+                      className={`ssh-connect-pipeline-circle ${state}`}
+                      title={step.label}
+                      aria-label={`${step.label}: ${state}`}
+                    >
+                      <span className="ssh-connect-pipeline-ring" aria-hidden="true" />
+                      {state === 'done' ? (
+                        <span className="ssh-connect-pipeline-check" aria-hidden="true">
+                          ✓
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {banner.steps ? (
+            <div className="ssh-connect-stage-label">
+              {banner.kind === 'error'
+                ? banner.title
+                : banner.steps[visualStepIndex]?.label}
+            </div>
+          ) : (
+            <div className="ssh-connect-stage-label">{banner.title}</div>
+          )}
+
+          {banner.confirm === 'hostkey' && banner.facts?.length ? (
+            <dl className="ssh-connect-toast-facts">
+              {banner.facts
+                .filter((f) => f.label !== 'Host')
+                .map((fact) => (
+                  <div
+                    key={`${fact.label}-${fact.value}`}
+                    className="ssh-connect-toast-fact"
+                  >
+                    <dt>{fact.label}</dt>
+                    <dd
+                      className={fact.mono ? 'mono' : undefined}
+                      title={fact.value}
+                    >
+                      {fact.value}
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          ) : null}
+
+          <div
+            className={`ssh-connect-toast-log-wrap${
+              banner.kind === 'error' ? ' has-copy' : ''
+            }`}
+          >
+            {banner.kind === 'error' ? (
               <button
                 type="button"
-                className="ssh-connect-toast-btn quiet"
-                onClick={() => {
-                  overlayDismissedRef.current = true;
-                  setOverlay(null);
-                }}
+                className={`ssh-connect-toast-log-copy${
+                  logCopied ? ' copied' : ''
+                }`}
+                title={logCopied ? 'Copied' : 'Copy log'}
+                aria-label={logCopied ? 'Copied' : 'Copy log'}
+                onClick={copyLog}
               >
-                Dismiss
+                {logCopied ? (
+                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 4.6-4.6L12.2 5.5 6.5 11.2z"
+                    />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M5.5 2A1.5 1.5 0 0 0 4 3.5v8A1.5 1.5 0 0 0 5.5 13H11a1 1 0 0 0 1-1V3.5A1.5 1.5 0 0 0 10.5 2h-5zM5 3.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V11H5.5a.5.5 0 0 1-.5-.5v-7z"
+                    />
+                    <path
+                      fill="currentColor"
+                      d="M2 5.5A1.5 1.5 0 0 1 3.5 4H4v1h-.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5H9v1H3.5A1.5 1.5 0 0 1 2 12.5v-7z"
+                    />
+                  </svg>
+                )}
               </button>
             ) : null}
+            <pre className="ssh-connect-toast-log">{logText}</pre>
           </div>
-          {banner.detail ? (
-            <pre className="ssh-connect-toast-detail">{banner.detail}</pre>
-          ) : null}
+
           {banner.confirm === 'hostkey' ? (
             <div className="ssh-connect-toast-actions">
               <button
@@ -614,16 +1167,6 @@ export function TerminalPane({
               >
                 Trust & continue
               </button>
-            </div>
-          ) : null}
-          {banner.kind === 'auth' ? (
-            <div className="ssh-connect-toast-hint">
-              Type in the terminal — input is not shown here.
-            </div>
-          ) : null}
-          {banner.kind === 'error' ? (
-            <div className="ssh-connect-toast-hint">
-              Tab kept open so you can retry or close it.
             </div>
           ) : null}
         </div>

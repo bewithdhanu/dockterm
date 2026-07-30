@@ -379,10 +379,21 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
         ? '/usr/bin/ssh'
         : 'ssh';
 
-  // Quiet client-side chatter (known_hosts warnings); MOTD is still server-side.
+  // Quiet enough to avoid MOTD-like client chatter, but INFO surfaces
+  // “Connecting to …” so the UI can reflect real progress when available.
   const term = pty.spawn(
     sshBin,
-    ['-o', 'LogLevel=ERROR', '-o', 'UpdateHostKeys=no', alias],
+    [
+      '-o',
+      'LogLevel=INFO',
+      '-o',
+      'UpdateHostKeys=no',
+      '-o',
+      'ConnectTimeout=30',
+      '-o',
+      'ConnectionAttempts=1',
+      alias,
+    ],
     {
       name: 'xterm-256color',
       cols,

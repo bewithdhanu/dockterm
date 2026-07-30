@@ -148,6 +148,7 @@ export function TerminalSplitView({
               sshHost={pane.ssh || null}
               onTitle={(title) => onPaneTitle?.(pane.id, title)}
               onCwd={(cwd) => onPaneCwd?.(pane.id, cwd)}
+              onClose={() => onClosePane?.(pane.id)}
             />
           </div>
           <TerminalFooter
