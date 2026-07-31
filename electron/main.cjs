@@ -243,7 +243,48 @@ function buildWindowOptions() {
   return windowOpts;
 }
 
-/** Native menu without Chromium/browser defaults (no View/Help/visible Edit). */
+/** @type {'dom' | 'term'} */
+let editFocusKind = 'dom';
+
+function wireEditFocusTracking() {
+  ipcMain.removeAllListeners('dockterm:edit-focus');
+  ipcMain.on('dockterm:edit-focus', (_event, kind) => {
+    editFocusKind = kind === 'term' ? 'term' : 'dom';
+  });
+}
+
+/**
+ * When the terminal is focused, intercept edit shortcuts so the Edit menu
+ * roles don't no-op on xterm's empty DOM selection. Inputs use normal roles.
+ */
+function wireTerminalEditShortcuts(win) {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    if (editFocusKind !== 'term') return;
+
+    const isMac = process.platform === 'darwin';
+    const mod = isMac ? input.meta : input.control;
+    if (!mod || input.alt) return;
+
+    const key = String(input.key || '').toLowerCase();
+    if (key === 'c' && !input.shift) {
+      event.preventDefault();
+      win.webContents.send('dockterm:clipboard', 'copy');
+      return;
+    }
+    if (key === 'v' && !input.shift) {
+      event.preventDefault();
+      win.webContents.send('dockterm:clipboard', 'paste');
+      return;
+    }
+    if (key === 'a' && !input.shift) {
+      event.preventDefault();
+      win.webContents.send('dockterm:clipboard', 'selectAll');
+    }
+  });
+}
+
+/** Native menu — Edit must be visible on macOS or accelerators never register. */
 function installAppMenu() {
   const isMac = process.platform === 'darwin';
 
@@ -265,7 +306,26 @@ function installAppMenu() {
         { role: 'quit' },
       ],
     });
+  }
 
+  // Visible Edit menu (required for ⌘A/X/C/V in inputs on macOS).
+  template.push({
+    label: 'Edit',
+    submenu: [
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { role: 'pasteAndMatchStyle' },
+      { role: 'delete' },
+      { type: 'separator' },
+      { role: 'selectAll' },
+    ],
+  });
+
+  if (isMac) {
     template.push({
       label: 'Window',
       submenu: [
@@ -285,20 +345,62 @@ function installAppMenu() {
       ],
     });
   } else {
-    // Framed-less Windows/Linux: only Quit — no always-on Edit/View chrome.
     template.push({
       label: 'File',
       submenu: [{ role: 'quit' }],
     });
   }
 
-  // No Edit/copy/paste roles — those steal ⌘C/⌘V from xterm (DOM clipboard is empty).
-  // Terminal clipboard is handled in the renderer.
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Right-click Cut/Copy/Paste/Select All in inputs, textareas, contenteditable. */
+function wireContextMenu(win) {
+  win.webContents.on('context-menu', (event, params) => {
+    const editable = Boolean(params.isEditable);
+    const hasSelection = Boolean(params.selectionText);
+
+    if (!editable && !hasSelection) return;
+
+    // Stop Chromium's empty/broken default menu.
+    event.preventDefault();
+
+    /** @type {import('electron').MenuItemConstructorOptions[]} */
+    const items = [];
+
+    if (editable) {
+      const f = params.editFlags || {};
+      items.push(
+        { role: 'undo', enabled: f.canUndo !== false },
+        { role: 'redo', enabled: f.canRedo !== false },
+        { type: 'separator' },
+        { role: 'cut', enabled: f.canCut !== false },
+        { role: 'copy', enabled: f.canCopy !== false },
+        { role: 'paste', enabled: f.canPaste !== false },
+        { role: 'delete', enabled: f.canDelete !== false },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: f.canSelectAll !== false }
+      );
+    } else if (hasSelection) {
+      items.push({
+        role: 'copy',
+        enabled: params.editFlags?.canCopy !== false,
+      });
+    }
+
+    if (!items.length) return;
+    Menu.buildFromTemplate(items).popup({
+      window: win,
+      x: params.x,
+      y: params.y,
+    });
+  });
 }
 
 async function createWindow() {
   mainWindow = new BrowserWindow(buildWindowOptions());
+  wireContextMenu(mainWindow);
+  wireTerminalEditShortcuts(mainWindow);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -347,6 +449,7 @@ function shutdown() {
 
 app.whenReady().then(() => {
   wireWindowControls();
+  wireEditFocusTracking();
   installAppMenu();
   if (process.platform === 'darwin' && app.dock) {
     const icon = resolveIcon();

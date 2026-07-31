@@ -1,5 +1,44 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function computeEditFocus(target) {
+  const el =
+    target instanceof Element
+      ? target
+      : target && target.parentElement
+        ? target.parentElement
+        : null;
+  if (!el) return 'dom';
+  if (el.closest('.xterm') || el.closest('.terminal-host')) return 'term';
+  return 'dom';
+}
+
+function publishEditFocus(kind) {
+  try {
+    ipcRenderer.send('dockterm:edit-focus', kind);
+  } catch {
+    /* ignore */
+  }
+}
+
+function onFocusIn(e) {
+  publishEditFocus(computeEditFocus(e.target));
+}
+
+window.addEventListener('focusin', onFocusIn, true);
+window.addEventListener('DOMContentLoaded', () => {
+  publishEditFocus(computeEditFocus(document.activeElement));
+});
+
+ipcRenderer.on('dockterm:clipboard', (_event, action) => {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('dockterm:clipboard', { detail: { action } })
+    );
+  } catch {
+    /* ignore */
+  }
+});
+
 contextBridge.exposeInMainWorld('dockterm', {
   isElectron: true,
   platform: process.platform,

@@ -614,6 +614,16 @@ export function TerminalPane({
     fitRef.current = fit;
     serializeRef.current = serializeAddon;
 
+    let pasteLock = false;
+    const pasteOnce = (text) => {
+      if (!text || pasteLock) return;
+      pasteLock = true;
+      term.paste(text);
+      setTimeout(() => {
+        pasteLock = false;
+      }, 50);
+    };
+
     // xterm selection is not DOM text — handle clipboard ourselves.
     term.attachCustomKeyEventHandler((ev) => {
       if (ev.type !== 'keydown') return true;
@@ -632,8 +642,8 @@ export function TerminalPane({
         return false;
       }
 
-      // Paste shortcuts: block xterm from treating them as input; the native
-      // `paste` listener below performs a single paste (avoids double-paste).
+      // Paste shortcuts: block xterm from treating them as input; paste is done
+      // via the native `paste` event and/or dockterm:clipboard (Electron menu).
       if (
         (primary && key === 'v' && !ev.altKey && (mac || !ev.shiftKey)) ||
         (ev.ctrlKey && ev.shiftKey && key === 'v')
@@ -656,16 +666,34 @@ export function TerminalPane({
       e.stopPropagation();
       const fromEvent = e.clipboardData?.getData('text/plain');
       if (fromEvent) {
-        term.paste(fromEvent);
+        pasteOnce(fromEvent);
         return;
       }
-      // Electron / restricted clipboard: fall back to async read once.
-      void readClipboard().then((text) => {
-        if (text) term.paste(text);
-      });
+      void readClipboard().then((text) => pasteOnce(text));
+    };
+    const onAppClipboard = (e) => {
+      if (!activeRef.current) return;
+      const action = e?.detail?.action;
+      if (action === 'copy') {
+        if (!term.hasSelection()) return;
+        void writeClipboard(term.getSelection());
+        return;
+      }
+      if (action === 'paste') {
+        void readClipboard().then((text) => pasteOnce(text));
+        return;
+      }
+      if (action === 'selectAll') {
+        try {
+          term.selectAll();
+        } catch {
+          /* ignore */
+        }
+      }
     };
     el.addEventListener('copy', onCopy);
     el.addEventListener('paste', onPaste);
+    window.addEventListener('dockterm:clipboard', onAppClipboard);
 
     const fitAndResize = () => {
       try {
@@ -763,21 +791,22 @@ export function TerminalPane({
         handleLiveOutput(data);
       },
       onExit: (code) => {
-        const note = `\r\n[SSH disconnected — exit code ${code ?? 0}]\r\nTab kept open so you can read any error above.\r\n`;
         if (isSsh) {
-          connectLogRef.current += note;
-          setOverlayRef.current({
-            mode: 'error',
-            text: stripAnsi(connectLogRef.current),
-            host: sshHost || '',
-          });
-          // With restored history, also leave a short note in the terminal.
-          if (hasHistoryRef.current && !divertRef.current) {
-            term.writeln('');
-            term.writeln(
-              `\x1b[91m[SSH disconnected — exit code ${code ?? 0}]\x1b[0m`
-            );
+          // Connection-phase failure only — keep toast so the user can read why.
+          const stillConnecting =
+            divertRef.current ||
+            sshStatusRef.current === 'connecting' ||
+            !finishedConnectRef.current;
+          if (stillConnecting) {
+            const note = `\r\n[SSH disconnected — exit code ${code ?? 0}]\r\n`;
+            connectLogRef.current += note;
+            setOverlayRef.current({
+              mode: 'error',
+              text: stripAnsi(connectLogRef.current),
+              host: sshHost || '',
+            });
           }
+          // Already connected: App closes the pane; no failure toast.
           return;
         }
         term.writeln('');
@@ -838,6 +867,7 @@ export function TerminalPane({
       ro.disconnect();
       el.removeEventListener('copy', onCopy);
       el.removeEventListener('paste', onPaste);
+      window.removeEventListener('dockterm:clipboard', onAppClipboard);
       dataDisp.dispose();
       titleDisp.dispose();
       unregister();

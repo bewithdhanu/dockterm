@@ -24,7 +24,6 @@ import {
   TERM_THEME_EVENT,
   syncAppChromeForView,
 } from './terminalThemes.js';
-import { appendCommandHistory } from './commandHistory.js';
 
 const SSH_CONFIG_TAB_ID = 'editor:ssh-config';
 const NAV_KEY = 'dockterm.nav-section';
@@ -519,7 +518,21 @@ export default function App() {
           handlersRef.current.get(msg.id)?.onExit?.(msg.exitCode);
           sshPromptBufRef.current.delete(msg.id);
 
-          // Keep SSH tabs open on failure/disconnect so errors remain visible.
+          const owner = tabsRef.current.find(
+            (t) =>
+              t.kind === 'terminal' && t.panes?.some((p) => p.id === msg.id)
+          );
+          const pane = owner?.panes?.find((p) => p.id === msg.id);
+          const isSsh = Boolean(pane?.ssh || pane?.kind === 'ssh');
+          const wasConnecting = isSsh && pane?.sshStatus === 'connecting';
+
+          // SSH session that had already connected (user typed `exit`, hangup, etc.)
+          // — close the pane/tab. Keep the error toast only for failed connects.
+          if (isSsh && !wasConnecting) {
+            if (owner) closePaneRef.current?.(owner.id, msg.id);
+            return;
+          }
+
           setTabs((prev) =>
             prev.map((t) => {
               if (t.kind !== 'terminal') return t;
@@ -531,7 +544,7 @@ export default function App() {
                     ? {
                         ...p,
                         alive: false,
-                        sshStatus: p.ssh || p.kind === 'ssh' ? 'error' : null,
+                        sshStatus: isSsh ? 'error' : null,
                       }
                     : p
                 ),
@@ -1082,8 +1095,8 @@ export default function App() {
     };
   }, [persistSession]);
 
-  // Native browser context menu only in terminals, editors, and text fields.
-  // Everywhere else: block default (custom menus handle their own areas).
+  // Native context menu for text fields (browser) / Electron main handler.
+  // Do not preventDefault on editable fields in Electron — main.cjs owns that menu.
   useEffect(() => {
     const onContextMenu = (e) => {
       const el = e.target;
@@ -1091,17 +1104,26 @@ export default function App() {
         e.preventDefault();
         return;
       }
-      if (
+      const editable = Boolean(
         el.closest('input') ||
-        el.closest('textarea') ||
-        el.closest('select') ||
-        el.closest('[contenteditable="true"]') ||
-        el.closest('.xterm') ||
-        el.closest('.terminal-host') ||
-        el.closest('.monaco-editor') ||
-        el.closest('.editor-pane') ||
-        el.closest('.allow-native-menu')
-      ) {
+          el.closest('textarea') ||
+          el.closest('select') ||
+          el.closest('[contenteditable="true"]') ||
+          el.closest('.monaco-editor') ||
+          el.closest('.editor-pane') ||
+          el.closest('.allow-native-menu')
+      );
+      const inTerminal = Boolean(
+        el.closest('.xterm') || el.closest('.terminal-host')
+      );
+
+      if (editable) {
+        // Browser: allow native menu. Electron: main process shows the menu
+        // (preventDefault there). Don't block the event here.
+        return;
+      }
+      if (inTerminal) {
+        e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -1136,11 +1158,7 @@ export default function App() {
       let data = String(snippet.command || '').replace(/\r\n/g, '\n');
       if (!data.trim()) return;
       if (!data.endsWith('\n')) data += '\n';
-      appendCommandHistory({
-        command: data.replace(/\n$/, ''),
-        where: pane.ssh || (pane.kind === 'ssh' ? tab.title : null) || 'Local',
-        cwd: pane.cwd || null,
-      });
+      // Snippet runs are not recorded in Command History.
       send({ type: 'input', id: pane.id, data });
     },
     [send]
