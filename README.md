@@ -79,7 +79,17 @@ Prebuilt installers for six targets:
 - Windows — NSIS `.exe`
 - Linux x64 / arm64 — `.AppImage`
 
-> Unsigned macOS builds: right-click the app → **Open** the first time (Gatekeeper).
+### macOS: “DockTerm is damaged and can’t be opened”
+
+Release builds are **not notarized** yet, so Gatekeeper may show that message after a download. The app is not corrupt — clear the quarantine flag:
+
+```bash
+xattr -cr /Applications/DockTerm.app
+```
+
+Then open DockTerm again (or right-click the app → **Open**).
+
+If you opened it from the DMG first, drag it to **Applications**, then run the command above on that copy.
 
 ## Quick start (development)
 

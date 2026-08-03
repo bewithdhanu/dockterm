@@ -724,7 +724,9 @@
           <h2 class="sec-title">Start in minutes</h2>
           <p class="sec-lead">
             Download a release build, or clone the repo and run
-            <code>npm run desktop</code> for local packaging.
+            <code>npm run desktop</code> for local packaging. macOS may say the
+            app is “damaged” — that is Gatekeeper on an unsigned build; run
+            <code>xattr -cr /Applications/DockTerm.app</code> then open again.
           </p>
           <div class="cta-row">
             <a
