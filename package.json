@@ -62,6 +62,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "electron": "^35.7.5",
@@ -85,6 +86,8 @@
       "runtime/**/*",
       "build/icon.png",
       "build/icon.icns",
+      "build/entitlements.mac.plist",
+      "scripts/notarize.cjs",
       "package.json"
     ],
     "asar": false,
@@ -97,10 +100,13 @@
         "dmg",
         "zip"
       ],
-      "identity": null,
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false
     },
+    "afterSign": "scripts/notarize.cjs",
     "win": {
       "icon": "build/icon.png",
       "target": [

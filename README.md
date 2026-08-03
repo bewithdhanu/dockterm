@@ -79,17 +79,13 @@ Prebuilt installers for six targets:
 - Windows — NSIS `.exe`
 - Linux x64 / arm64 — `.AppImage`
 
-### macOS: “DockTerm is damaged and can’t be opened”
+### macOS Gatekeeper
 
-Release builds are **not notarized** yet, so Gatekeeper may show that message after a download. The app is not corrupt — clear the quarantine flag:
+Downloads open normally only when the build is **signed and notarized** with an Apple Developer ID.
 
-```bash
-xattr -cr /Applications/DockTerm.app
-```
+Until Apple signing secrets are configured on the release pipeline, macOS may block the app after download. That is Apple policy for unsigned software — not something end users should fix with Terminal commands.
 
-Then open DockTerm again (or right-click the app → **Open**).
-
-If you opened it from the DMG first, drag it to **Applications**, then run the command above on that copy.
+Maintainers: see [docs/macos-signing.md](./docs/macos-signing.md) to enable notarized releases.
 
 ## Quick start (development)
 

@@ -12,6 +12,7 @@ client/dist/
 build/*
 !build/icon.png
 !build/icon.icns
+!build/entitlements.mac.plist
 .vite/
 _pty_probe.mjs
 docs/mockups/.chrome*

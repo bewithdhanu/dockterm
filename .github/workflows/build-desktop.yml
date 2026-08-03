@@ -89,6 +89,15 @@ jobs:
 
       - name: Build renderer + bundle Node runtime + package
         shell: bash
+        env:
+          # macOS: when CSC_LINK is set, sign + notarize so downloads open without Terminal tricks.
+          # When unset, build stays unsigned (CI still produces installers).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           npm run build
