@@ -1,0 +1,157 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - '.github/workflows/build-desktop.yml'
+      - 'package.json'
+      - 'electron/**'
+      - 'server/**'
+      - 'client/**'
+      - 'scripts/**'
+      - 'runtime/**'
+      - 'build/icon.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+            electron_args: --mac --arm64
+            artifact: dockterm-mac-arm64
+
+          - name: macOS x64
+            os: macos-15-intel
+            electron_args: --mac --x64
+            artifact: dockterm-mac-x64
+
+          - name: Linux x64
+            os: ubuntu-24.04
+            electron_args: --linux --x64
+            artifact: dockterm-linux-x64
+
+          - name: Linux arm64
+            os: ubuntu-24.04-arm
+            electron_args: --linux --arm64
+            artifact: dockterm-linux-arm64
+
+          - name: Windows x64
+            os: windows-2025
+            electron_args: --win --x64
+            artifact: dockterm-win-x64
+
+          - name: Windows arm64
+            os: windows-11-arm
+            electron_args: --win --arm64
+            artifact: dockterm-win-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          cache: npm
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libgbm1 \
+            libasound2t64 || sudo apt-get install -y --no-install-recommends \
+            libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer + bundle Node runtime + package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          npm run runtime:node
+          npx electron-builder ${{ matrix.electron_args }} --publish never
+
+      - name: Collect installer artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out-artifacts
+          # Installers land in release/; ignore *-unpacked dirs.
+          find release -maxdepth 1 -type f \( \
+            -name '*.dmg' -o \
+            -name '*.zip' -o \
+            -name '*.AppImage' -o \
+            -name '*.exe' -o \
+            -name '*.blockmap' \
+          \) -print -exec cp -f {} out-artifacts/ \;
+          echo "Collected:"
+          ls -lah out-artifacts
+          count="$(find out-artifacts -type f | wc -l | tr -d ' ')"
+          if [[ "${count}" -lt 1 ]]; then
+            echo "No installer artifacts found. release/ contents:"
+            ls -laR release || true
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Flatten release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          find dist-artifacts -type f \
+            \( -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.exe' -o -name '*.blockmap' -o -name '*.yml' -o -name '*.yaml' \) \
+            -exec cp -v {} upload/ \;
+          ls -lah upload
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: upload/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

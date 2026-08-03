@@ -12,9 +12,54 @@ let serverPort = null;
 let isQuitting = false;
 
 const PREFERRED_PORT = 39281;
+const SERVER_BOOT_MS = 45000;
+const SERVER_BOOT_AT_LOGIN_MS = 90000;
+const LOGIN_START_DELAY_MS = 4000;
+
+/** @type {string | null} */
+let logFilePath = null;
+/** @type {fs.WriteStream | null} */
+let logStream = null;
 
 function appRoot() {
   return app.getAppPath();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function ensureLogSink() {
+  if (logStream) return logFilePath;
+  try {
+    const dir = app.getPath('logs');
+    fs.mkdirSync(dir, { recursive: true });
+    logFilePath = path.join(dir, 'main.log');
+    logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+    logStream.write(`\n---- ${new Date().toISOString()} pid=${process.pid} ----\n`);
+  } catch (err) {
+    console.error('DockTerm log sink failed:', err);
+  }
+  return logFilePath;
+}
+
+function logLine(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.error(line);
+  try {
+    ensureLogSink();
+    logStream?.write(`${line}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
+function wasOpenedAtLogin() {
+  try {
+    return Boolean(app.getLoginItemSettings()?.wasOpenedAtLogin);
+  } catch {
+    return false;
+  }
 }
 
 function resolveIcon() {
@@ -25,14 +70,30 @@ function resolveIcon() {
   return undefined;
 }
 
+function bundledNodePath() {
+  const name = process.platform === 'win32' ? 'node.exe' : 'node';
+  return path.join(appRoot(), 'runtime', name);
+}
+
 function resolveNodeBinary() {
+  // 1) Explicit override (debug only)
+  if (process.env.DOCKTERM_NODE && fs.existsSync(process.env.DOCKTERM_NODE)) {
+    return process.env.DOCKTERM_NODE;
+  }
+
+  // 2) Bundled official Node shipped inside the .app (isolated from system Node)
+  const bundled = bundledNodePath();
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+
+  // 3) Dev / unpackaged fallback — system Node 20–22
   const candidates = [
-    process.env.DOCKTERM_NODE,
     '/opt/homebrew/opt/node@22/bin/node',
     '/usr/local/opt/node@22/bin/node',
     '/opt/homebrew/bin/node',
     '/usr/local/bin/node',
-  ].filter(Boolean);
+  ];
 
   for (const candidate of candidates) {
     try {
@@ -55,8 +116,31 @@ function resolveNodeBinary() {
   }
 
   throw new Error(
-    'DockTerm needs Node.js 20–22 to run terminals.\n\nInstall from https://nodejs.org or: brew install node@22'
+    'DockTerm runtime Node is missing from the app bundle.\n\nReinstall DockTerm, or for development run: npm run runtime:node'
   );
+}
+
+/** Prefer bundled Node immediately; only retry when falling back to system paths. */
+async function resolveNodeBinaryReady(timeoutMs = 30000) {
+  const bundled = bundledNodePath();
+  if (
+    (process.env.DOCKTERM_NODE && fs.existsSync(process.env.DOCKTERM_NODE)) ||
+    fs.existsSync(bundled)
+  ) {
+    return resolveNodeBinary();
+  }
+
+  const started = Date.now();
+  let lastErr = null;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      return resolveNodeBinary();
+    } catch (err) {
+      lastErr = err;
+      await sleep(500);
+    }
+  }
+  throw lastErr || new Error('Node.js not found');
 }
 
 function probeServer(port, timeoutMs = 800) {
@@ -76,76 +160,181 @@ function probeServer(port, timeoutMs = 800) {
   });
 }
 
-function waitForServer(port, timeoutMs = 20000) {
+function waitForServer(port, timeoutMs, isDead) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve(value);
+    };
+
     const tryOnce = () => {
+      if (settled) return;
+      if (typeof isDead === 'function' && isDead()) {
+        finish(
+          new Error(
+            'DockTerm server process exited before becoming ready. See ~/Library/Logs/DockTerm/main.log'
+          )
+        );
+        return;
+      }
+      if (Date.now() - started > timeoutMs) {
+        finish(
+          new Error(
+            'DockTerm server did not start in time. See ~/Library/Logs/DockTerm/main.log'
+          )
+        );
+        return;
+      }
+
       const req = http.get(
         { host: '127.0.0.1', port, path: '/api/snippets', timeout: 1000 },
         (res) => {
           res.resume();
-          resolve(port);
+          finish(null, port);
         }
       );
-      req.on('error', () => {
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error('DockTerm server did not start in time'));
-          return;
-        }
-        setTimeout(tryOnce, 150);
-      });
+      const retry = () => {
+        if (settled) return;
+        setTimeout(tryOnce, 200);
+      };
+      req.on('error', retry);
       req.on('timeout', () => {
         req.destroy();
+        retry();
       });
     };
     tryOnce();
   });
 }
 
-function startBackend() {
-  const nodeBin = resolveNodeBinary();
-  const serverEntry = path.join(appRoot(), 'server', 'index.js');
-  const port = PREFERRED_PORT;
-
-  serverProc = spawn(nodeBin, [serverEntry], {
-    cwd: appRoot(),
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      DOCKTERM_ROOT: appRoot(),
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      ELECTRON_RUN_AS_NODE: undefined,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  serverProc.stdout?.on('data', (buf) => {
-    process.stdout.write(`[dockterm-server] ${buf}`);
-  });
-  serverProc.stderr?.on('data', (buf) => {
-    process.stderr.write(`[dockterm-server] ${buf}`);
-  });
-  serverProc.on('exit', (code, signal) => {
-    console.error(`DockTerm server exited code=${code} signal=${signal}`);
+function killServerProc() {
+  if (!serverProc || serverProc.killed) {
     serverProc = null;
-  });
+    return;
+  }
+  try {
+    serverProc.kill('SIGTERM');
+  } catch {
+    /* ignore */
+  }
+  serverProc = null;
+}
 
-  return waitForServer(port).then((p) => {
-    serverPort = p;
-    return p;
-  });
+function startBackend(timeoutMs = SERVER_BOOT_MS) {
+  return (async () => {
+    const nodeBin = await resolveNodeBinaryReady(
+      Math.min(timeoutMs, wasOpenedAtLogin() ? 45000 : 15000)
+    );
+    const serverEntry = path.join(appRoot(), 'server', 'index.js');
+    const port = PREFERRED_PORT;
+    ensureLogSink();
+
+    logLine(`Starting backend with ${nodeBin} (timeout ${timeoutMs}ms)`);
+    logLine(`server entry: ${serverEntry}`);
+
+    if (!fs.existsSync(serverEntry)) {
+      throw new Error(`Server entry missing: ${serverEntry}`);
+    }
+
+    let childExited = false;
+    let exitSummary = '';
+    const outputTail = [];
+    const pushOut = (buf) => {
+      const text = String(buf);
+      outputTail.push(text);
+      if (outputTail.length > 40) outputTail.shift();
+      logStream?.write(text);
+      process.stdout.write(`[dockterm-server] ${text}`);
+    };
+
+    killServerProc();
+
+    const runtimeBinDir = path.dirname(nodeBin);
+    serverProc = spawn(nodeBin, [serverEntry], {
+      cwd: appRoot(),
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        DOCKTERM_ROOT: appRoot(),
+        HOST: '127.0.0.1',
+        PORT: String(port),
+        ELECTRON_RUN_AS_NODE: undefined,
+        // Prefer bundled runtime on PATH so any nested node lookups stay isolated.
+        PATH: [runtimeBinDir, '/usr/bin', '/bin', process.env.PATH || ''].join(
+          path.delimiter
+        ),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    serverProc.stdout?.on('data', pushOut);
+    serverProc.stderr?.on('data', pushOut);
+    serverProc.on('error', (err) => {
+      childExited = true;
+      exitSummary = `spawn error: ${err.message}`;
+      logLine(exitSummary);
+    });
+    serverProc.on('exit', (code, signal) => {
+      childExited = true;
+      exitSummary = `exited code=${code} signal=${signal}`;
+      logLine(`DockTerm server ${exitSummary}`);
+      serverProc = null;
+    });
+
+    try {
+      const readyPort = await waitForServer(port, timeoutMs, () => childExited);
+      serverPort = readyPort;
+      logLine(`Backend ready on port ${readyPort}`);
+      return readyPort;
+    } catch (err) {
+      const detail = outputTail.join('').trim() || exitSummary;
+      killServerProc();
+      const base = err instanceof Error ? err.message : String(err);
+      throw new Error(detail ? `${base}\n\n${detail.slice(-1200)}` : base);
+    }
+  })();
 }
 
 async function ensureBackend() {
+  ensureLogSink();
+  const atLogin = wasOpenedAtLogin();
+  logLine(
+    `ensureBackend atLogin=${atLogin} appPath=${appRoot()} port=${PREFERRED_PORT}`
+  );
+
+  if (atLogin) {
+    logLine(`Login-item launch — waiting ${LOGIN_START_DELAY_MS}ms for system settle`);
+    await sleep(LOGIN_START_DELAY_MS);
+  }
+
   if (serverPort && (await probeServer(serverPort))) {
+    logLine(`Reusing existing backend on ${serverPort}`);
     return serverPort;
   }
   if (await probeServer(PREFERRED_PORT)) {
     serverPort = PREFERRED_PORT;
+    logLine(`Attached to already-running backend on ${PREFERRED_PORT}`);
     return serverPort;
   }
-  return startBackend();
+
+  const timeoutMs = atLogin ? SERVER_BOOT_AT_LOGIN_MS : SERVER_BOOT_MS;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      logLine(`Backend start attempt ${attempt}/3`);
+      return await startBackend(timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      logLine(`Backend attempt ${attempt} failed: ${err?.message || err}`);
+      killServerProc();
+      if (attempt < 3) await sleep(1500 * attempt);
+    }
+  }
+  throw lastErr || new Error('DockTerm server did not start');
 }
 
 function hideMainWindow() {
@@ -167,6 +356,7 @@ function wireWindowControls() {
   ipcMain.removeHandler('dialog:pickIdentityFile');
   ipcMain.removeHandler('clipboard:writeText');
   ipcMain.removeHandler('clipboard:readText');
+  ipcMain.removeHandler('shell:openExternal');
   ipcMain.removeAllListeners('window:minimize');
   ipcMain.removeAllListeners('window:maximize');
   ipcMain.removeAllListeners('window:close');
@@ -210,6 +400,29 @@ function wireWindowControls() {
     if (result.canceled || !result.filePaths?.[0]) return null;
     return result.filePaths[0];
   });
+  ipcMain.handle('shell:openExternal', async (_event, url) => {
+    const target = String(url ?? '').trim();
+    if (!isSafeExternalUrl(target)) return false;
+    await shell.openExternal(target);
+    return true;
+  });
+}
+
+/** http(s), mailto, and common app deep-links — reject javascript: etc. */
+function isSafeExternalUrl(url) {
+  try {
+    const u = new URL(url);
+    const protocol = u.protocol.toLowerCase();
+    return (
+      protocol === 'http:' ||
+      protocol === 'https:' ||
+      protocol === 'mailto:' ||
+      protocol === 'vscode:' ||
+      protocol === 'cursor:'
+    );
+  } catch {
+    return false;
+  }
 }
 
 function buildWindowOptions() {
@@ -406,8 +619,12 @@ async function createWindow() {
     mainWindow?.show();
   });
 
+  // xterm WebLinksAddon may call window.open() with no URL (about:blank).
+  // Only forward real external targets; deny everything else.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
 
@@ -463,9 +680,15 @@ app.whenReady().then(() => {
   }
 
   createWindow().catch((err) => {
-    console.error('DockTerm failed to start:', err);
+    logLine(`DockTerm failed to start: ${err?.stack || err}`);
     const { dialog } = require('electron');
-    dialog.showErrorBox('DockTerm failed to start', String(err?.message || err));
+    const logHint = logFilePath
+      ? `\n\nDetails: ${logFilePath}`
+      : '\n\nDetails: ~/Library/Logs/DockTerm/main.log';
+    dialog.showErrorBox(
+      'DockTerm failed to start',
+      String(err?.message || err) + logHint
+    );
     isQuitting = true;
     app.quit();
   });

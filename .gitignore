@@ -1,4 +1,5 @@
 release/
+runtime/
 *.dmg
 *.AppImage
 *.exe
@@ -8,5 +9,9 @@ client/dist/
 *.log
 .env
 .env.*
-build/
+build/*
+!build/icon.png
+!build/icon.icns
 .vite/
+docs/assets/shot-*
+_pty_probe.mjs

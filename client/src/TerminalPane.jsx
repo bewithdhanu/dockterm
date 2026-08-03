@@ -22,6 +22,20 @@ function stripAnsi(text) {
     .replace(/\r/g, '');
 }
 
+/** Open a terminal link in the OS default app (Electron) or a new tab (browser). */
+function openTerminalLink(_event, uri) {
+  const url = String(uri ?? '').trim();
+  if (!url) return;
+  const api = typeof window !== 'undefined' ? window.dockterm : null;
+  if (api?.openExternal) {
+    void api.openExternal(url);
+    return;
+  }
+  // Avoid xterm's default window.open() then location=url — Electron maps that
+  // to about:blank and never opens the real link.
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 async function writeClipboard(text) {
   const value = String(text ?? '');
   const api = typeof window !== 'undefined' ? window.dockterm : null;
@@ -607,7 +621,7 @@ export function TerminalPane({
     const fit = new FitAddon();
     const serializeAddon = new SerializeAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon(openTerminalLink));
     term.loadAddon(serializeAddon);
     term.open(el);
     termRef.current = term;

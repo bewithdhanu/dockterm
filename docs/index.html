@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DockTerm — Multi-tab SSH Terminal for macOS, Windows &amp; Linux</title>
+    <meta
+      name="description"
+      content="DockTerm is an SSH workspace with custom ~/.ssh/config hosts, command snippets, searchable history, multi-tab sessions, and remote process tools — for macOS, Windows, and Linux."
+    />
+    <meta
+      name="keywords"
+      content="SSH terminal, SSH client, SSH snippets, command history, SSH config GUI, multi-tab SSH, IdentityFile, ProxyJump, Electron terminal, xterm.js, remote process manager"
+    />
+    <meta name="author" content="DockTerm" />
+    <link rel="canonical" href="https://bewithdhanu.github.io/dockterm/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bewithdhanu.github.io/dockterm/" />
+    <meta
+      property="og:title"
+      content="DockTerm — Multi-tab SSH Terminal for macOS, Windows & Linux"
+    />
+    <meta
+      property="og:description"
+      content="Custom SSH hosts, snippets, command history, multi-tab sessions, and process tools — one desktop workspace."
+    />
+    <meta
+      property="og:image"
+      content="https://bewithdhanu.github.io/dockterm/assets/icon-512.png"
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="DockTerm — Multi-tab SSH Terminal" />
+    <meta
+      name="twitter:description"
+      content="Modern SSH terminal for macOS, Windows, and Linux."
+    />
+    <meta
+      name="twitter:image"
+      content="https://bewithdhanu.github.io/dockterm/assets/icon-512.png"
+    />
+    <link rel="icon" href="assets/icon-512.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0c0f14;
+        --bg-elev: #141922;
+        --ink: #eef2f8;
+        --muted: #93a0b5;
+        --line: rgba(238, 242, 248, 0.1);
+        --accent: #3b82f6;
+        --accent-2: #60a5fa;
+        --ok: #34d399;
+        --font-display: "Syne", "Outfit", system-ui, sans-serif;
+        --font-ui: "Outfit", system-ui, sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+        --wrap: min(1100px, calc(100% - 2.75rem));
+        --radius: 14px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-size: 16px;
+        line-height: 1.5;
+        background:
+          radial-gradient(
+            1100px 520px at 78% -8%,
+            rgba(59, 130, 246, 0.2),
+            transparent 58%
+          ),
+          radial-gradient(
+            800px 420px at -8% 30%,
+            rgba(96, 165, 250, 0.08),
+            transparent 55%
+          ),
+          #0c0f14;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        color: var(--accent-2);
+      }
+
+      .wrap {
+        width: var(--wrap);
+        margin-inline: auto;
+      }
+
+      /* —— Top bar —— */
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        background: rgba(12, 15, 20, 0.78);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar-inner {
+        width: var(--wrap);
+        margin-inline: auto;
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .brand-mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        text-decoration: none;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 1.15rem;
+        letter-spacing: -0.04em;
+      }
+
+      .brand-mark img {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .nav-links a {
+        text-decoration: none;
+        color: var(--muted);
+        font-size: 0.92rem;
+        font-weight: 500;
+        padding: 0.45rem 0.7rem;
+        border-radius: 8px;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+
+      .nav-links a:hover {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .nav-links .nav-cta {
+        margin-left: 0.35rem;
+        color: #fff;
+        background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+      }
+
+      .nav-links .nav-cta:hover {
+        color: #fff;
+        background: linear-gradient(145deg, #60a5fa, #2563eb);
+      }
+
+      @media (max-width: 640px) {
+        .nav-links a:not(.nav-cta) {
+          display: none;
+        }
+      }
+
+      /* —— Hero —— */
+      .hero {
+        position: relative;
+        padding: 4.5rem 0 2.5rem;
+        overflow: hidden;
+      }
+
+      .brand-hero {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: clamp(3.2rem, 9vw, 5.2rem);
+        line-height: 0.95;
+        letter-spacing: -0.055em;
+        margin: 0 0 1rem;
+        animation: rise 0.75s ease-out both;
+      }
+
+      .brand-hero span {
+        background: linear-gradient(120deg, var(--ink) 35%, var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .lede {
+        margin: 0;
+        max-width: 36rem;
+        color: var(--muted);
+        font-size: clamp(1.02rem, 2vw, 1.15rem);
+        line-height: 1.6;
+        font-weight: 400;
+        animation: rise 0.85s ease-out 0.05s both;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        animation: rise 0.9s ease-out 0.1s both;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.8rem 1.2rem;
+        border-radius: 10px;
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 600;
+        border: 1px solid transparent;
+        transition: transform 0.18s ease, background 0.18s ease,
+          border-color 0.18s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+        color: #fff;
+        box-shadow: 0 12px 28px rgba(29, 78, 216, 0.32);
+      }
+
+      .btn-ghost {
+        background: rgba(255, 255, 255, 0.03);
+        border-color: var(--line);
+        color: var(--ink);
+      }
+
+      .btn-ghost:hover {
+        border-color: rgba(238, 242, 248, 0.22);
+      }
+
+      /* —— Hero terminal mock (no real screenshots) —— */
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 2rem;
+        align-items: center;
+      }
+
+      @media (max-width: 900px) {
+        .hero-grid {
+          grid-template-columns: 1fr;
+        }
+        .hero-visual {
+          display: none;
+        }
+      }
+
+      .hero-visual {
+        animation: rise 1s ease-out 0.15s both;
+      }
+
+      .term-frame {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+        background: linear-gradient(180deg, #12171f, #0c1016);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        line-height: 1.55;
+      }
+
+      .term-bar {
+        display: flex;
+        gap: 6px;
+        padding: 0.7rem 0.85rem;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .term-bar i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #3a4150;
+        display: block;
+      }
+
+      .term-bar i:nth-child(1) {
+        background: #ff5f57;
+      }
+      .term-bar i:nth-child(2) {
+        background: #febc2e;
+      }
+      .term-bar i:nth-child(3) {
+        background: #28c840;
+      }
+
+      .term-body {
+        padding: 1rem 1.1rem 1.25rem;
+        color: #9aa7bc;
+        white-space: pre-wrap;
+      }
+
+      .term-body .g {
+        color: var(--ok);
+      }
+      .term-body .b {
+        color: var(--accent-2);
+      }
+      .term-body .w {
+        color: var(--ink);
+      }
+
+      .cursor {
+        display: inline-block;
+        width: 0.55ch;
+        height: 1.05em;
+        background: var(--accent);
+        vertical-align: text-bottom;
+        animation: blink 1.05s steps(1) infinite;
+      }
+
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* —— Sections —— */
+      section {
+        padding: 4.25rem 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .sec-title {
+        font-family: var(--font-display);
+        font-size: clamp(1.75rem, 4vw, 2.4rem);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        margin: 0 0 0.55rem;
+      }
+
+      .sec-lead {
+        margin: 0 0 2rem;
+        color: var(--muted);
+        max-width: 38rem;
+        line-height: 1.6;
+        font-size: 1.02rem;
+      }
+
+      .feature-list {
+        display: grid;
+        gap: 0;
+      }
+
+      .feature {
+        display: grid;
+        grid-template-columns: 8.5rem 1fr;
+        gap: 1.25rem;
+        padding: 1.35rem 0;
+        border-top: 1px solid var(--line);
+        align-items: start;
+      }
+
+      .feature:last-child {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .feature dt {
+        margin: 0;
+        font-family: var(--font-display);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: var(--accent-2);
+        font-size: 1.02rem;
+      }
+
+      .feature dd {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 0.98rem;
+      }
+
+      @media (max-width: 600px) {
+        .feature {
+          grid-template-columns: 1fr;
+          gap: 0.3rem;
+        }
+      }
+
+      .highlight-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.9rem;
+        margin-bottom: 2.5rem;
+      }
+
+      @media (max-width: 720px) {
+        .highlight-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .highlight {
+        padding: 1.25rem 1.3rem 1.35rem;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(20, 25, 34, 0.72);
+      }
+
+      .highlight h3 {
+        margin: 0 0 0.45rem;
+        font-family: var(--font-display);
+        font-size: 1.15rem;
+        letter-spacing: -0.03em;
+        font-weight: 700;
+      }
+
+      .highlight p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.55;
+      }
+
+      .platforms {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.9rem;
+      }
+
+      @media (max-width: 700px) {
+        .platforms {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .plat {
+        padding: 1.25rem 1.3rem;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(20, 25, 34, 0.8);
+      }
+
+      .plat h3 {
+        margin: 0 0 0.35rem;
+        font-family: var(--font-display);
+        font-size: 1.12rem;
+        letter-spacing: -0.03em;
+        font-weight: 700;
+      }
+
+      .plat p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .final .cta-row {
+        margin-top: 1.35rem;
+      }
+
+      /* —— Footer —— */
+      .site-footer {
+        border-top: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.25);
+      }
+
+      .site-footer-inner {
+        width: var(--wrap);
+        margin-inline: auto;
+        padding: 1.6rem 0 2rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.85rem 1.5rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+
+      .site-footer a {
+        text-decoration: none;
+        color: var(--muted);
+      }
+
+      .site-footer a:hover {
+        color: var(--ink);
+      }
+
+      .footer-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        font-family: var(--font-display);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+      }
+
+      .footer-brand img {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.9rem 1.15rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand-mark" href="./">
+          <img src="assets/icon-512.png" width="30" height="30" alt="" />
+          DockTerm
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#platforms">Platforms</a>
+          <a href="https://github.com/bewithdhanu/dockterm">GitHub</a>
+          <a
+            class="nav-cta"
+            href="https://github.com/bewithdhanu/dockterm/releases"
+            >Download</a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" style="border-top: 0; padding-top: 3.5rem">
+        <div class="wrap hero-grid">
+          <div>
+            <h1 class="brand-hero"><span>DockTerm</span></h1>
+            <p class="lede">
+              Custom SSH hosts, snippets, and searchable history — plus
+              multi-tab sessions and process tools — built around your existing
+              <code>~/.ssh/config</code>.
+            </p>
+            <div class="cta-row">
+              <a
+                class="btn btn-primary"
+                href="https://github.com/bewithdhanu/dockterm/releases"
+                >Download builds</a
+              >
+              <a
+                class="btn btn-ghost"
+                href="https://github.com/bewithdhanu/dockterm"
+                >View source</a
+              >
+            </div>
+          </div>
+
+          <div class="hero-visual" aria-hidden="true">
+            <div class="term-frame">
+              <div class="term-bar"><i></i><i></i><i></i></div>
+              <div class="term-body">
+<span class="g">➜</span> <span class="b">ssh</span> <span class="w">prod-api</span>
+<span class="muted">Connected · identity loaded</span>
+<span class="g">prod-api</span>:<span class="b">~</span>$ <span class="w">systemctl status nginx</span>
+<span class="g">prod-api</span>:<span class="b">~</span>$ <span class="cursor"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <h2 class="sec-title">More than multi-tab SSH</h2>
+          <p class="sec-lead">
+            Tabs are only the shell. DockTerm is built around the workflow that
+            sits next to the terminal — hosts, snippets, history, and ops.
+          </p>
+
+          <div class="highlight-grid">
+            <article class="highlight">
+              <h3>Custom SSH hosts</h3>
+              <p>
+                Manage aliases from <code>~/.ssh/config</code> with
+                <code>HostName</code>, <code>User</code>, <code>Port</code>,
+                <code>IdentityFile</code>, <code>ProxyJump</code>, and
+                <code>Include</code>. Add hosts in the UI or open the full Monaco
+                config editor.
+              </p>
+            </article>
+            <article class="highlight">
+              <h3>Snippets</h3>
+              <p>
+                Save named commands and replay them into the focused session.
+                Stored in <code>~/.ssh/shippets</code> so you can back them up or
+                sync them — without cluttering typed history.
+              </p>
+            </article>
+            <article class="highlight">
+              <h3>Command history</h3>
+              <p>
+                Everything you type is kept with host context. Search, filter,
+                open details, then run again or copy — perfect for “what did I
+                run on that box?”
+              </p>
+            </article>
+            <article class="highlight">
+              <h3>Tabs, splits &amp; themes</h3>
+              <p>
+                Several servers in one window, split panes for side-by-side
+                work, terminal themes, OS badges on hosts, and clickable links
+                that open in your default browser.
+              </p>
+            </article>
+          </div>
+
+          <dl class="feature-list">
+            <div class="feature">
+              <dt>Ops</dt>
+              <dd>
+                Top processes, listening ports, and pkill by PID or port —
+                plus session stats when available (passwordless
+                <code>sudo -n</code> supported).
+              </dd>
+            </div>
+            <div class="feature">
+              <dt>Config</dt>
+              <dd>
+                First-class OpenSSH config editing with syntax highlighting —
+                not a watered-down form when you need advanced directives.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt>Desktop</dt>
+              <dd>
+                Electron app with a bundled Node runtime. No system Node
+                install, no version conflicts with whatever else you run.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="platforms">
+        <div class="wrap">
+          <h2 class="sec-title">Six builds, one codebase</h2>
+          <p class="sec-lead">
+            CI packages DockTerm for every common desktop architecture — grab
+            the artifact that matches your machine.
+          </p>
+          <div class="platforms">
+            <article class="plat">
+              <h3>macOS</h3>
+              <p>Apple Silicon &amp; Intel — DMG / ZIP</p>
+            </article>
+            <article class="plat">
+              <h3>Windows</h3>
+              <p>x64 &amp; arm64 — NSIS installer</p>
+            </article>
+            <article class="plat">
+              <h3>Linux</h3>
+              <p>x64 &amp; arm64 — AppImage</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="final" id="download">
+        <div class="wrap">
+          <h2 class="sec-title">Start in minutes</h2>
+          <p class="sec-lead">
+            Download a release build, or clone the repo and run
+            <code>npm run desktop</code> for local packaging.
+          </p>
+          <div class="cta-row">
+            <a
+              class="btn btn-primary"
+              href="https://github.com/bewithdhanu/dockterm/releases"
+              >Get DockTerm</a
+            >
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/bewithdhanu/dockterm#readme"
+              >Read the docs</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        <a class="footer-brand" href="./">
+          <img src="assets/icon-512.png" width="22" height="22" alt="" />
+          DockTerm
+        </a>
+        <div class="footer-links">
+          <a href="https://github.com/bewithdhanu/dockterm">GitHub</a>
+          <a href="https://github.com/bewithdhanu/dockterm/releases">Releases</a>
+          <a href="https://github.com/bewithdhanu/dockterm/blob/main/LICENSE"
+            >MIT License</a
+          >
+        </div>
+        <span>© 2026 DockTerm</span>
+      </div>
+    </footer>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "DockTerm",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "description": "SSH workspace with custom ~/.ssh/config hosts, command snippets, searchable history, multi-tab sessions, and process tools.",
+        "url": "https://bewithdhanu.github.io/dockterm/",
+        "downloadUrl": "https://github.com/bewithdhanu/dockterm/releases",
+        "image": "https://bewithdhanu.github.io/dockterm/assets/icon-512.png",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+  </body>
+</html>

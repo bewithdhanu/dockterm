@@ -49,4 +49,5 @@ contextBridge.exposeInMainWorld('dockterm', {
   pickIdentityFile: () => ipcRenderer.invoke('dialog:pickIdentityFile'),
   clipboardWrite: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   clipboardRead: () => ipcRenderer.invoke('clipboard:readText'),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 });
