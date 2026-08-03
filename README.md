@@ -2,9 +2,9 @@
 
 **SSH workspace for macOS, Windows, and Linux** — custom hosts from `~/.ssh/config`, command **snippets**, searchable **history**, multi-tab sessions, and remote process tools in one Electron app.
 
-[![GitHub release](https://img.shields.io/github/v/release/bewithdhanu/dockterm?include_prereleases&sort=semver)](https://github.com/bewithdhanu/dockterm/releases)
+[![GitHub release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/bewithdhanu/dockterm/releases/tag/v1.0.0)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-0ea5e9)](https://bewithdhanu.github.io/dockterm/)
-[![License](https://img.shields.io/github/license/bewithdhanu/dockterm)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 <p align="center">
   <img src="docs/assets/shot-hosts.jpg" alt="DockTerm hosts view (demo data)" width="900" />
@@ -68,16 +68,14 @@ Keywords: *SSH client*, *SSH terminal*, *SSH snippets*, *command history*, *mult
 
 ## Download
 
-Prebuilt installers are published from GitHub Actions for six targets:
+**Latest:** [v1.0.0](https://github.com/bewithdhanu/dockterm/releases/tag/v1.0.0)
+
+Prebuilt installers for six targets:
 
 - macOS Apple Silicon (arm64) — `.dmg` / `.zip`
 - macOS Intel (x64) — `.dmg` / `.zip`
-- Windows x64 — NSIS `.exe`
-- Windows arm64 — NSIS `.exe`
-- Linux x64 — `.AppImage`
-- Linux arm64 — `.AppImage`
-
-Grab the latest from **[Releases](https://github.com/bewithdhanu/dockterm/releases)**.
+- Windows — NSIS `.exe`
+- Linux x64 / arm64 — `.AppImage`
 
 > Unsigned macOS builds: right-click the app → **Open** the first time (Gatekeeper).
 
