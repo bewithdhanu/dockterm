@@ -1,6 +1,6 @@
 {
   "name": "dockterm",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": false,
   "type": "module",
   "description": "SSH workspace for macOS, Windows & Linux — custom ~/.ssh/config hosts, snippets, command history, multi-tab sessions, and process tools",
