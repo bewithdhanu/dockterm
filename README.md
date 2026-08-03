@@ -79,13 +79,16 @@ Prebuilt installers for six targets:
 - Windows — NSIS `.exe`
 - Linux x64 / arm64 — `.AppImage`
 
-### macOS Gatekeeper
+### macOS first launch (unsigned releases)
 
-Downloads open normally only when the build is **signed and notarized** with an Apple Developer ID.
+Apple charges $99/year for notarized apps that open with a double-click. DockTerm does not require that.
 
-Until Apple signing secrets are configured on the release pipeline, macOS may block the app after download. That is Apple policy for unsigned software — not something end users should fix with Terminal commands.
+After installing the DMG/ZIP, if macOS blocks the app:
 
-Maintainers: see [docs/macos-signing.md](./docs/macos-signing.md) to enable notarized releases.
+1. **System Settings → Privacy & Security**
+2. Click **Open Anyway** next to DockTerm
+
+No Terminal commands. Details and optional paid notarization: [docs/macos-signing.md](./docs/macos-signing.md).
 
 ## Quick start (development)
 
