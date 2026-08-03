@@ -41,11 +41,11 @@
     "start": "NODE_ENV=production node server/index.js",
     "runtime:node": "node scripts/fetch-runtime-node.mjs",
     "desktop": "npm run build && npm run runtime:node && electron .",
-    "dist": "npm run build && npm run runtime:node && electron-builder --publish never",
-    "dist:mac": "npm run build && npm run runtime:node && electron-builder --mac --publish never",
-    "dist:win": "npm run build && npm run runtime:node && electron-builder --win --publish never",
-    "dist:linux": "npm run build && npm run runtime:node && electron-builder --linux --publish never",
-    "dist:dir": "npm run build && npm run runtime:node && electron-builder --dir --publish never"
+    "dist": "npm run build && npm run runtime:node && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:mac": "npm run build && npm run runtime:node && electron-builder --config electron-builder.config.cjs --mac --publish never",
+    "dist:win": "npm run build && npm run runtime:node && electron-builder --config electron-builder.config.cjs --win --publish never",
+    "dist:linux": "npm run build && npm run runtime:node && electron-builder --config electron-builder.config.cjs --linux --publish never",
+    "dist:dir": "npm run build && npm run runtime:node && electron-builder --config electron-builder.config.cjs --dir --publish never"
   },
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
@@ -71,58 +71,5 @@
   },
   "engines": {
     "node": ">=20 <25"
-  },
-  "build": {
-    "appId": "app.dockterm.desktop",
-    "productName": "DockTerm",
-    "copyright": "Copyright © DockTerm",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "client/dist/**/*",
-      "server/**/*",
-      "electron/**/*",
-      "runtime/**/*",
-      "build/icon.png",
-      "build/icon.icns",
-      "build/entitlements.mac.plist",
-      "scripts/notarize.cjs",
-      "package.json"
-    ],
-    "asar": false,
-    "npmRebuild": false,
-    "buildDependenciesFromSource": false,
-    "mac": {
-      "icon": "build/icon.icns",
-      "category": "public.app-category.developer-tools",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": false
-    },
-    "afterSign": "scripts/notarize.cjs",
-    "win": {
-      "icon": "build/icon.png",
-      "target": [
-        "nsis"
-      ]
-    },
-    "linux": {
-      "icon": "build/icon.png",
-      "target": [
-        "AppImage"
-      ],
-      "category": "TerminalEmulator"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
   }
 }

@@ -1,37 +1,28 @@
-# macOS distribution (without paying Apple)
+# macOS distribution (unsigned OK)
 
-Apple does **not** offer a free way for a downloaded `.dmg` / `.app` to open like a notarized app. Developer ID + notarization requires the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year). SignPath and similar services still need that membership — they only host the certificate.
+DockTerm ships **ad-hoc signed** macOS builds by default (no Apple Developer fee). That is intentional.
 
-For an open-source project that will not pay that fee, use the paths below.
+## What users see (not an error)
 
-## What end users should do (no Terminal)
+After install, macOS may say Apple could not verify DockTerm, or block the first open. That is a **warning**, not corruption. Do **not** Move to Trash.
 
-After installing from a GitHub release:
+1. Dismiss the dialog (**Done**).
+2. Open **System Settings → Privacy & Security**.
+3. Click **Open Anyway** next to DockTerm.
+4. Confirm. Later launches are normal.
 
-1. Open **DockTerm** once (macOS may say it cannot verify the developer, or that it was blocked).
-2. Click **Done** / close the dialog — do **not** Move to Trash.
-3. Open **System Settings → Privacy & Security**.
-4. Scroll to **Security** and click **Open Anyway** next to DockTerm.
-5. Confirm. After that, DockTerm launches normally on that Mac.
-
-This is Apple’s supported path for unsigned software. No `xattr`, no Homebrew quarantine flags.
-
-Re-installing or upgrading a new unsigned build may ask for **Open Anyway** again.
-
-## Better free install options
-
-| Path | Who it’s for | Gatekeeper |
+| Dialog | Meaning | Action |
 | --- | --- | --- |
-| **Privacy & Security → Open Anyway** | Anyone using a release DMG/ZIP | One-time GUI approval |
-| **Clone + `npm run desktop`** | Developers | Built locally — usually fine |
-| **Windows / Linux installers** | Non-Mac users | No Apple Gatekeeper |
-| **Homebrew cask (unsigned)** | Brew users | Still needs Open Anyway on modern macOS |
+| “Apple could not verify…” / blocked + **Open Anyway** | Expected for unsigned releases | Allow once in Settings |
+| “is damaged… Move to Trash” | Bad build (missing ad-hoc signature) | Re-download a newer release — do not assume the file is corrupt |
 
-A Homebrew **formula that builds from source** can avoid Gatekeeper (local build), but Electron apps are heavy to compile; a cask of our prebuilt DMG does not remove the Open Anyway step.
+## Why ad-hoc signing
 
-## Optional: paid notarization (double-click, no prompts)
+On Apple Silicon, a completely unsigned `.app` downloaded from the internet often triggers the unrecoverable **damaged / Move to Trash** dialog. Ad-hoc signing (`codesign` identity `-`) seals the bundle so Gatekeeper uses the bypassable path above.
 
-If you later join the Developer Program (or a sponsor signs for you), CI already supports it. Add these secrets, then tag a release:
+## Optional: paid notarization (no prompts)
+
+If you later join the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year), add these secrets and tag a release. CI will Developer ID–sign and notarize instead of ad-hoc:
 
 | Secret | Value |
 | --- | --- |
@@ -40,9 +31,6 @@ If you later join the Developer Program (or a sponsor signs for you), CI already
 | `APPLE_ID` | Apple ID email |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password |
 | `APPLE_TEAM_ID` | Team ID (e.g. `A1B2C3D4E5`) |
-
-- **Secrets present** → signed + notarized macOS artifacts  
-- **Secrets missing** → unsigned builds still publish; users use **Open Anyway**
 
 ```bash
 export CSC_LINK="$(base64 -i DeveloperID.p12)"

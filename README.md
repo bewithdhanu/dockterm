@@ -81,14 +81,12 @@ Prebuilt installers for six targets:
 
 ### macOS first launch (unsigned releases)
 
-Apple charges $99/year for notarized apps that open with a double-click. DockTerm does not require that.
-
-After installing the DMG/ZIP, if macOS blocks the app:
+macOS builds are **ad-hoc signed** (no $99 Apple fee). First open may ask you to allow the app — that is a warning, not a broken download. Do **not** Move to Trash.
 
 1. **System Settings → Privacy & Security**
 2. Click **Open Anyway** next to DockTerm
 
-No Terminal commands. Details and optional paid notarization: [docs/macos-signing.md](./docs/macos-signing.md).
+Details: [docs/macos-signing.md](./docs/macos-signing.md).
 
 ## Quick start (development)
 

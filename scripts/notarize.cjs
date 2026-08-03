@@ -16,6 +16,12 @@ exports.default = async function notarizing(context) {
   const appleIdPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD;
   const teamId = process.env.APPLE_TEAM_ID;
 
+  // Ad-hoc / unsigned releases must not hit notarytool.
+  if (!process.env.CSC_LINK || !String(process.env.CSC_LINK).trim()) {
+    console.log('Skipping notarization — no CSC_LINK (ad-hoc macOS build).');
+    return;
+  }
+
   if (!appleId || !appleIdPassword || !teamId) {
     console.log(
       'Skipping notarization — set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID for Gatekeeper-ready builds.'
