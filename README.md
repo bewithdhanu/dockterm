@@ -2,7 +2,9 @@
 
 **SSH workspace for macOS, Windows, and Linux** — custom hosts from `~/.ssh/config`, command **snippets**, searchable **history**, multi-tab sessions, and remote process tools in one Electron app.
 
-[![GitHub release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/bewithdhanu/dockterm/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/github/v/release/bewithdhanu/dockterm?display_name=tag&sort=semver)](https://github.com/bewithdhanu/dockterm/releases/latest)
+[![Build](https://github.com/bewithdhanu/dockterm/actions/workflows/build-desktop.yml/badge.svg)](https://github.com/bewithdhanu/dockterm/actions/workflows/build-desktop.yml)
+[![Pages](https://github.com/bewithdhanu/dockterm/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/bewithdhanu/dockterm/actions/workflows/pages/pages-build-deployment)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-0ea5e9)](https://bewithdhanu.github.io/dockterm/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -68,7 +70,7 @@ Keywords: *SSH client*, *SSH terminal*, *SSH snippets*, *command history*, *mult
 
 ## Download
 
-**Latest:** [v1.0.0](https://github.com/bewithdhanu/dockterm/releases/tag/v1.0.0)
+**Latest release:** [github.com/bewithdhanu/dockterm/releases/latest](https://github.com/bewithdhanu/dockterm/releases/latest)
 
 Prebuilt installers for six targets:
 
