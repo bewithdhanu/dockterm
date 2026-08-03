@@ -1,0 +1,4 @@
+# Shows a Sponsor button on the repo when people want to help.
+# Prefer GitHub Sponsors once enabled; until then, route interest to an issue.
+custom:
+  - "https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest"

@@ -20,6 +20,12 @@ After install, macOS may say Apple could not verify DockTerm, or block the first
 
 On Apple Silicon, a completely unsigned `.app` downloaded from the internet often triggers the unrecoverable **damaged / Move to Trash** dialog. Ad-hoc signing (`codesign` identity `-`) seals the bundle so Gatekeeper uses the bypassable path above.
 
+## Looking for sponsors
+
+We're seeking a sponsor to cover the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year) so release builds can be Developer ID–signed and notarized. That removes the Open Anyway step for Mac users.
+
+[Open a sponsorship issue →](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest)
+
 ## Optional: paid notarization (no prompts)
 
 If you later join the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year), add these secrets and tag a release. CI will Developer ID–sign and notarize instead of ad-hoc:

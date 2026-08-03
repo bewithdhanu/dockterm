@@ -88,6 +88,8 @@ macOS builds are **ad-hoc signed** (no $99 Apple fee). First open may ask you to
 
 Details: [docs/macos-signing.md](./docs/macos-signing.md).
 
+**Looking for sponsors:** help cover the Apple Developer Program ($99/year) so future macOS releases can be notarized and open with a double-click. [Get in touch →](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest)
+
 ## Quick start (development)
 
 Requires **Node.js 20–22** for local development only. Packaged apps bundle their own Node.
@@ -155,6 +157,10 @@ Marketing / product page (GitHub Pages):
 ## Contributing
 
 Issues and PRs are welcome. For packaging changes, test with `npm run dist:dir` on your OS before opening a PR.
+
+## Sponsors
+
+DockTerm is free and MIT-licensed. We're looking for sponsors (individuals or companies) to fund **Apple notarization** so Mac users get Gatekeeper-clean downloads. If that sounds useful to you or your team, [open a sponsorship issue](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest).
 
 ## License
 
