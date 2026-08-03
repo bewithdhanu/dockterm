@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DockTerm demo — Hosts</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #1a1c23;
+        --panel: #242832;
+        --panel-2: #2a2e38;
+        --border: #323644;
+        --text: #e8eaef;
+        --muted: #b4bac8;
+        --accent: #3b82f6;
+        --font: "DM Sans", system-ui, sans-serif;
+        --mono: "SF Mono", Menlo, Monaco, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        width: 1320px;
+        height: 860px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 72px 1fr;
+        height: 100%;
+      }
+      .rail {
+        background: #15171e;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 56px 0 16px;
+      }
+      .rail .item {
+        width: 56px;
+        text-align: center;
+        font-size: 10px;
+        color: var(--muted);
+        padding: 8px 4px;
+        border-radius: 10px;
+      }
+      .rail .item.active {
+        background: var(--panel-2);
+        color: var(--text);
+      }
+      .rail .ico {
+        font-size: 18px;
+        display: block;
+        margin-bottom: 4px;
+      }
+      .main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .top {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px 0 78px;
+        border-bottom: 1px solid var(--border);
+        background: #171920;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .brand img {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+      }
+      .pill {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .content {
+        padding: 18px 22px;
+        flex: 1;
+      }
+      .search-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .search {
+        flex: 1;
+        background: #12141a;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .connect {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 10px;
+        padding: 0 18px;
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+        align-items: center;
+      }
+      .btn {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 7px 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        min-height: 78px;
+      }
+      .badge {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: #2f3340;
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #f97316;
+        flex-shrink: 0;
+      }
+      .badge.term {
+        color: #93c5fd;
+      }
+      .name {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .sub {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .demo-tag {
+        position: absolute;
+        top: 10px;
+        right: 14px;
+        font-size: 11px;
+        color: var(--muted);
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 10px;
+      }
+      .shell {
+        position: relative;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="demo-tag">Demo data · not a real machine</div>
+      <div class="app">
+        <aside class="rail">
+          <div class="item active"><span class="ico">▦</span>Hosts</div>
+          <div class="item"><span class="ico">&lt;/&gt;</span>Snippets</div>
+          <div class="item"><span class="ico">◷</span>History</div>
+          <div class="item"><span class="ico">⚙</span>Config</div>
+        </aside>
+        <section class="main">
+          <div class="top">
+            <div class="brand">
+              <img src="../assets/icon-512.png" alt="" />
+              DockTerm
+            </div>
+            <span class="pill">Hosts</span>
+          </div>
+          <div class="content">
+            <div class="search-row">
+              <div class="search">Find a host or ssh user@hostname…</div>
+              <button class="connect" type="button">CONNECT</button>
+            </div>
+            <div class="actions">
+              <button class="btn" type="button">+ New Host</button>
+              <button class="btn" type="button">Terminal</button>
+              <button class="btn" type="button">Config</button>
+              <div class="spacer"></div>
+              <button class="btn" type="button">Recent ▾</button>
+            </div>
+            <div class="grid">
+              <div class="card">
+                <div class="badge">Ub</div>
+                <div>
+                  <div class="name">prod-web</div>
+                  <div class="sub">deploy@10.0.12.10</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge">Ub</div>
+                <div>
+                  <div class="name">staging-api</div>
+                  <div class="sub">ubuntu@10.0.20.44</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge term">&gt;_</div>
+                <div>
+                  <div class="name">bastion</div>
+                  <div class="sub">ops@bastion.example.com</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge">Ub</div>
+                <div>
+                  <div class="name">db-primary</div>
+                  <div class="sub">postgres@10.0.30.5</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge term">&gt;_</div>
+                <div>
+                  <div class="name">ci-runner</div>
+                  <div class="sub">runner@ci.example.com</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge">Ub</div>
+                <div>
+                  <div class="name">edge-cdn</div>
+                  <div class="sub">admin@edge.example.net</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge term">&gt;_</div>
+                <div>
+                  <div class="name">build-box</div>
+                  <div class="sub">builder@10.0.40.8</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="badge">Ub</div>
+                <div>
+                  <div class="name">metrics</div>
+                  <div class="sub">monitor@10.0.50.3</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

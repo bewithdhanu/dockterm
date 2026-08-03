@@ -13,5 +13,5 @@ build/*
 !build/icon.png
 !build/icon.icns
 .vite/
-docs/assets/shot-*
 _pty_probe.mjs
+docs/mockups/.chrome*

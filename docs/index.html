@@ -26,9 +26,9 @@
     />
     <meta
       property="og:image"
-      content="https://bewithdhanu.github.io/dockterm/assets/icon-512.png"
+      content="https://bewithdhanu.github.io/dockterm/assets/shot-hosts.jpg"
     />
-    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="DockTerm — Multi-tab SSH Terminal" />
     <meta
       name="twitter:description"
@@ -36,7 +36,7 @@
     />
     <meta
       name="twitter:image"
-      content="https://bewithdhanu.github.io/dockterm/assets/icon-512.png"
+      content="https://bewithdhanu.github.io/dockterm/assets/shot-hosts.jpg"
     />
     <link rel="icon" href="assets/icon-512.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -270,93 +270,70 @@
         border-color: rgba(238, 242, 248, 0.22);
       }
 
-      /* —— Hero terminal mock (no real screenshots) —— */
+      /* —— Product screenshots (demo data only) —— */
       .hero-grid {
         display: grid;
-        grid-template-columns: 1.1fr 0.9fr;
-        gap: 2rem;
-        align-items: center;
+        gap: 1.75rem;
       }
 
-      @media (max-width: 900px) {
-        .hero-grid {
-          grid-template-columns: 1fr;
-        }
-        .hero-visual {
-          display: none;
-        }
-      }
-
-      .hero-visual {
+      .shot-hero {
+        margin-top: 0.5rem;
         animation: rise 1s ease-out 0.15s both;
       }
 
-      .term-frame {
+      .shot-frame {
         border: 1px solid var(--line);
         border-radius: 16px;
         overflow: hidden;
-        background: linear-gradient(180deg, #12171f, #0c1016);
+        background: #090b10;
         box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
-        font-family: var(--font-mono);
-        font-size: 0.78rem;
-        line-height: 1.55;
       }
 
-      .term-bar {
-        display: flex;
-        gap: 6px;
-        padding: 0.7rem 0.85rem;
-        border-bottom: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.02);
-      }
-
-      .term-bar i {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: #3a4150;
+      .shot-frame img {
         display: block;
+        width: 100%;
+        height: auto;
       }
 
-      .term-bar i:nth-child(1) {
-        background: #ff5f57;
-      }
-      .term-bar i:nth-child(2) {
-        background: #febc2e;
-      }
-      .term-bar i:nth-child(3) {
-        background: #28c840;
+      .shot-caption {
+        margin: 0.85rem 0 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 500;
       }
 
-      .term-body {
-        padding: 1rem 1.1rem 1.25rem;
-        color: #9aa7bc;
-        white-space: pre-wrap;
+      .shots-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-top: 1rem;
       }
 
-      .term-body .g {
-        color: var(--ok);
-      }
-      .term-body .b {
-        color: var(--accent-2);
-      }
-      .term-body .w {
-        color: var(--ink);
-      }
-
-      .cursor {
-        display: inline-block;
-        width: 0.55ch;
-        height: 1.05em;
-        background: var(--accent);
-        vertical-align: text-bottom;
-        animation: blink 1.05s steps(1) infinite;
-      }
-
-      @keyframes blink {
-        50% {
-          opacity: 0;
+      @media (max-width: 800px) {
+        .shots-grid {
+          grid-template-columns: 1fr;
         }
+      }
+
+      .shot-card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--bg-elev);
+      }
+
+      .shot-card img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .shot-card p {
+        margin: 0;
+        padding: 0.85rem 1rem 1rem;
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 500;
       }
 
       /* —— Sections —— */
@@ -555,6 +532,7 @@
           DockTerm
         </a>
         <nav class="nav-links" aria-label="Primary">
+          <a href="#screenshots">Screenshots</a>
           <a href="#features">Features</a>
           <a href="#platforms">Platforms</a>
           <a href="https://github.com/bewithdhanu/dockterm">GitHub</a>
@@ -591,16 +569,56 @@
             </div>
           </div>
 
-          <div class="hero-visual" aria-hidden="true">
-            <div class="term-frame">
-              <div class="term-bar"><i></i><i></i><i></i></div>
-              <div class="term-body">
-<span class="g">➜</span> <span class="b">ssh</span> <span class="w">prod-api</span>
-<span class="muted">Connected · identity loaded</span>
-<span class="g">prod-api</span>:<span class="b">~</span>$ <span class="w">systemctl status nginx</span>
-<span class="g">prod-api</span>:<span class="b">~</span>$ <span class="cursor"></span>
-              </div>
+          <figure class="shot-hero">
+            <div class="shot-frame">
+              <img
+                src="assets/shot-hosts.jpg"
+                width="1320"
+                height="860"
+                alt="DockTerm hosts view with sample demo SSH aliases"
+                loading="eager"
+              />
             </div>
+            <figcaption class="shot-caption">
+              Hosts UI with <strong>sample demo data</strong> (not from a real
+              machine) — search, connect, manage aliases.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="screenshots">
+        <div class="wrap">
+          <h2 class="sec-title">See the features</h2>
+          <p class="sec-lead">
+            Screenshots use fictional hosts and commands so you can see the
+            product without anyone’s private SSH config.
+          </p>
+          <div class="shots-grid">
+            <figure class="shot-card">
+              <img
+                src="assets/shot-hosts.jpg"
+                width="1320"
+                height="860"
+                alt="Demo DockTerm host grid"
+                loading="lazy"
+              />
+              <p>
+                Hosts · custom SSH aliases, quick connect, New Host / Config.
+              </p>
+            </figure>
+            <figure class="shot-card">
+              <img
+                src="assets/shot-session.jpg"
+                width="1320"
+                height="860"
+                alt="Demo DockTerm SSH session with snippets and ops footer"
+                loading="lazy"
+              />
+              <p>
+                Session · snippets sidebar, live SSH, Procs / pkill / Stats.
+              </p>
+            </figure>
           </div>
         </div>
       </section>
@@ -751,7 +769,7 @@
         "description": "SSH workspace with custom ~/.ssh/config hosts, command snippets, searchable history, multi-tab sessions, and process tools.",
         "url": "https://bewithdhanu.github.io/dockterm/",
         "downloadUrl": "https://github.com/bewithdhanu/dockterm/releases",
-        "image": "https://bewithdhanu.github.io/dockterm/assets/icon-512.png",
+        "image": "https://bewithdhanu.github.io/dockterm/assets/shot-hosts.jpg",
         "offers": {
           "@type": "Offer",
           "price": "0",

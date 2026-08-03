@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DockTerm demo — Session</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #1a1c23;
+        --panel: #242832;
+        --border: #323644;
+        --text: #e8eaef;
+        --muted: #b4bac8;
+        --accent: #3b82f6;
+        --ok: #6a9955;
+        --blue: #569cd6;
+        --font: "DM Sans", system-ui, sans-serif;
+        --mono: "SF Mono", Menlo, Monaco, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        width: 1320px;
+        height: 860px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+      }
+      .shell {
+        position: relative;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      .demo-tag {
+        position: absolute;
+        top: 10px;
+        right: 14px;
+        z-index: 5;
+        font-size: 11px;
+        color: var(--muted);
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 10px;
+      }
+      .top {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px 0 78px;
+        border-bottom: 1px solid var(--border);
+        background: #171920;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 8px;
+      }
+      .brand img {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+      }
+      .tab {
+        background: #2a2e38;
+        border: 1px solid var(--border);
+        border-radius: 8px 8px 0 0;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .tab.active {
+        background: var(--bg);
+        color: var(--text);
+        border-bottom-color: var(--bg);
+      }
+      .plus {
+        color: var(--muted);
+        font-size: 16px;
+        margin-left: 4px;
+      }
+      .grow {
+        flex: 1;
+      }
+      .icon-btn {
+        color: var(--muted);
+        font-size: 14px;
+        padding: 4px 8px;
+      }
+      .body {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 28px 1fr 280px;
+        min-height: 0;
+      }
+      .side-toggle {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        display: grid;
+        place-items: center;
+        border-right: 1px solid var(--border);
+        background: #15171e;
+      }
+      .term {
+        padding: 16px 18px;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.55;
+        background: #12141a;
+        overflow: hidden;
+      }
+      .prompt {
+        color: var(--ok);
+      }
+      .path {
+        color: var(--blue);
+      }
+      .dir {
+        color: #4fc1ff;
+      }
+      .dim {
+        color: #6b7280;
+      }
+      .cursor {
+        display: inline-block;
+        width: 8px;
+        height: 15px;
+        background: var(--accent);
+        vertical-align: text-bottom;
+      }
+      .drawer {
+        border-left: 1px solid var(--border);
+        background: #1e2129;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .drawer-tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .dtab {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        background: transparent;
+      }
+      .dtab.active {
+        background: rgba(59, 130, 246, 0.2);
+        color: #93c5fd;
+      }
+      .drawer h3 {
+        margin: 4px 0 0;
+        font-size: 14px;
+      }
+      .count {
+        display: inline-block;
+        background: #323644;
+        border-radius: 999px;
+        padding: 1px 7px;
+        font-size: 11px;
+        margin-left: 6px;
+        color: var(--muted);
+      }
+      .filter {
+        background: #12141a;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .snip {
+        background: #242832;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .snip .t {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .snip .c {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .footer {
+        height: 40px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 14px;
+        background: #171920;
+        font-size: 12px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+      }
+      .foot-btn {
+        background: #2a2e38;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .rates {
+        color: #86efac;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="demo-tag">Demo data · not a real machine</div>
+      <div class="top">
+        <div class="brand">
+          <img src="../assets/icon-512.png" alt="" />
+          DockTerm
+        </div>
+        <div class="tab">Hosts</div>
+        <div class="tab active">deploy@prod-web: ~</div>
+        <div class="plus">+</div>
+        <div class="grow"></div>
+        <div class="icon-btn">▦</div>
+        <div class="icon-btn">☰</div>
+      </div>
+      <div class="body">
+        <div class="side-toggle">&lt; HOSTS</div>
+        <div class="term">
+          <div>
+            <span class="prompt">deploy@prod-web</span>:<span class="path">~</span>$
+            ls -la
+          </div>
+          <div class="dim">total 48</div>
+          <div>
+            drwxr-xr-x 12 deploy deploy 4096 Mar 12 09:14
+            <span class="dir">app</span>
+          </div>
+          <div>
+            drwxr-xr-x 4 deploy deploy 4096 Mar 12 09:14
+            <span class="dir">backup</span>
+          </div>
+          <div>
+            drwxr-xr-x 6 deploy deploy 4096 Mar 11 18:02
+            <span class="dir">logs</span>
+          </div>
+          <div>
+            drwxr-xr-x 3 deploy deploy 4096 Mar 10 11:40
+            <span class="dir">nginx</span>
+          </div>
+          <div>
+            -rw-r--r-- 1 deploy deploy 220 Mar 1 08:00 .bashrc
+          </div>
+          <div style="margin-top: 10px">
+            <span class="prompt">deploy@prod-web</span>:<span class="path">~</span>$
+            systemctl status nginx --no-pager
+          </div>
+          <div>● nginx.service - A high performance web server</div>
+          <div>&nbsp;&nbsp;&nbsp;Active: <span style="color: #86efac">active (running)</span></div>
+          <div style="margin-top: 10px">
+            <span class="prompt">deploy@prod-web</span>:<span class="path">~</span>$
+            <span class="cursor"></span>
+          </div>
+        </div>
+        <aside class="drawer">
+          <div class="drawer-tabs">
+            <div class="dtab active">&lt;/&gt;</div>
+            <div class="dtab">◷</div>
+            <div class="dtab">◐</div>
+          </div>
+          <h3>Snippets <span class="count">3</span></h3>
+          <div class="filter">Filter snippets…</div>
+          <div class="snip">
+            <div class="t">reload nginx</div>
+            <div class="c">sudo systemctl reload nginx</div>
+          </div>
+          <div class="snip">
+            <div class="t">tail app log</div>
+            <div class="c">tail -f ~/logs/app.log</div>
+          </div>
+          <div class="snip">
+            <div class="t">disk usage</div>
+            <div class="c">df -h /</div>
+          </div>
+        </aside>
+      </div>
+      <div class="footer">
+        <div class="dot"></div>
+        <span>SSH · prod-web</span>
+        <div class="grow"></div>
+        <span class="rates">↓ 12 KB/s &nbsp; ↑ 1.4 KB/s</span>
+        <button class="foot-btn" type="button">Procs</button>
+        <button class="foot-btn" type="button">pkill</button>
+        <button class="foot-btn" type="button">Stats</button>
+      </div>
+    </div>
+  </body>
+</html>

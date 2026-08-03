@@ -7,6 +7,14 @@
 [![License](https://img.shields.io/github/license/bewithdhanu/dockterm)](./LICENSE)
 
 <p align="center">
+  <img src="docs/assets/shot-hosts.jpg" alt="DockTerm hosts view (demo data)" width="900" />
+</p>
+
+<p align="center">
+  <em>UI preview uses fictional demo hosts — not real machine data.</em>
+</p>
+
+<p align="center">
   <a href="https://bewithdhanu.github.io/dockterm/"><strong>Product page →</strong></a>
   ·
   <a href="https://github.com/bewithdhanu/dockterm/releases"><strong>Download builds →</strong></a>
