@@ -173,6 +173,7 @@ export function ConfigEditorPane({ active, onHostsChanged }) {
           <div className="sidebar-empty">Loading config…</div>
         ) : (
           <Editor
+            key={monacoTheme}
             height="100%"
             theme={monacoTheme}
             language="sshconfig"
