@@ -21,6 +21,8 @@ export function RightDrawer({
   onClose,
   snippetsOnly = false,
   initialTab,
+  connectionKey,
+  connectionLabel,
 }) {
   const [tab, setTab] = useState(() =>
     snippetsOnly ? 'snippets' : initialTab || readTab()
@@ -96,7 +98,10 @@ export function RightDrawer({
         ) : tab === 'history' ? (
           <CommandHistoryPanel onRun={onRun} />
         ) : (
-          <ThemesPanel />
+          <ThemesPanel
+            connectionKey={connectionKey}
+            connectionLabel={connectionLabel}
+          />
         )}
       </div>
     </aside>

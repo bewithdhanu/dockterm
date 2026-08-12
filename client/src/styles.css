@@ -169,11 +169,67 @@ body,
   padding: 0 10px 0 4px;
 }
 
+.chrome-trailing-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.app-theme-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.app-theme-btn:hover {
+  color: var(--text);
+}
+
+.app-theme-btn.active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.theme-swatch-follow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    135deg,
+    var(--panel-2) 0%,
+    var(--bg) 45%,
+    var(--accent-soft) 100%
+  );
+  color: var(--text);
+}
+
 /* Keep tabs, panel toggles, and window buttons clickable. */
 .top-chrome.is-electron .tab-wrap,
 .top-chrome.is-electron .home-tab,
 .top-chrome.is-electron .new-tab,
 .top-chrome.is-electron .chrome-panel-toggles,
+.top-chrome.is-electron .chrome-trailing-row,
+.top-chrome.is-electron .app-theme-control,
 .top-chrome.is-electron .app-titlebar-controls {
   -webkit-app-region: no-drag;
   app-region: no-drag;

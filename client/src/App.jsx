@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuLayoutGrid, LuPanelLeft, LuPanelRight } from 'react-icons/lu';
 import { TitleBar } from './TitleBar.jsx';
+import { AppThemeControl } from './AppThemeControl.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
 import { NavRail } from './NavRail.jsx';
 import { HostsView } from './HostsView.jsx';
@@ -21,8 +22,8 @@ import { endsWithShellPrompt } from './shellPrompt.js';
 import { nextCopyAlias, useSshHosts } from './useSshHosts.js';
 import { useHostOs } from './useHostOs.js';
 import {
-  TERM_THEME_EVENT,
-  syncAppChromeForView,
+  connectionKeyFromPane,
+  connectionLabel,
 } from './terminalThemes.js';
 
 const SSH_CONFIG_TAB_ID = 'editor:ssh-config';
@@ -101,16 +102,13 @@ export default function App() {
   const hostsApi = useSshHosts();
   const hostOs = useHostOs();
 
-  // Hosts view = DockTerm chrome; session (local/SSH) = selected terminal theme app-wide.
-  useEffect(() => {
-    syncAppChromeForView(mainView);
-  }, [mainView]);
-
-  useEffect(() => {
-    const onTheme = () => syncAppChromeForView(mainView);
-    window.addEventListener(TERM_THEME_EVENT, onTheme);
-    return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
-  }, [mainView]);
+  const focusedConnectionKey = useMemo(() => {
+    const tab = tabs.find((t) => t.id === activeId);
+    if (!tab || tab.kind !== 'terminal') return connectionKeyFromPane(null);
+    const pane =
+      tab.panes?.find((p) => p.id === tab.focusedPaneId) || tab.panes?.[0];
+    return connectionKeyFromPane(pane?.ssh);
+  }, [tabs, activeId]);
 
   const registerHandlers = useCallback((id, handlers) => {
     handlersRef.current.set(id, handlers);
@@ -1236,44 +1234,51 @@ export default function App() {
       <TitleBar
         session={mainView === 'session'}
         trailing={
-          mainView === 'session' ? (
-            <div className="chrome-panel-toggles" role="group" aria-label="Panels">
-              <button
-                type="button"
-                className={`chrome-panel-toggle ${
-                  sessionHostsOpen ? 'active' : ''
-                }`}
-                title={sessionHostsOpen ? 'Hide hosts' : 'Show hosts'}
-                aria-pressed={sessionHostsOpen}
-                onClick={() => setSessionHosts(!sessionHostsOpen)}
+          <div className="chrome-trailing-row">
+            <AppThemeControl />
+            {mainView === 'session' ? (
+              <div
+                className="chrome-panel-toggles"
+                role="group"
+                aria-label="Panels"
               >
-                <LuPanelLeft size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={`chrome-panel-toggle ${
-                  sessionSnippetsOpen && !hostDetail ? 'active' : ''
-                }`}
-                title={
-                  sessionSnippetsOpen && !hostDetail
-                    ? 'Hide sidebar'
-                    : 'Show sidebar'
-                }
-                aria-pressed={sessionSnippetsOpen && !hostDetail}
-                onClick={() => {
-                  if (sessionSnippetsOpen && !hostDetail) {
-                    setSessionSnippets(false);
-                    return;
+                <button
+                  type="button"
+                  className={`chrome-panel-toggle ${
+                    sessionHostsOpen ? 'active' : ''
+                  }`}
+                  title={sessionHostsOpen ? 'Hide hosts' : 'Show hosts'}
+                  aria-pressed={sessionHostsOpen}
+                  onClick={() => setSessionHosts(!sessionHostsOpen)}
+                >
+                  <LuPanelLeft size={15} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className={`chrome-panel-toggle ${
+                    sessionSnippetsOpen && !hostDetail ? 'active' : ''
+                  }`}
+                  title={
+                    sessionSnippetsOpen && !hostDetail
+                      ? 'Hide sidebar'
+                      : 'Show sidebar'
                   }
-                  setHostDetail(null);
-                  setSnippetDetail(null);
-                  setSessionSnippets(true);
-                }}
-              >
-                <LuPanelRight size={15} aria-hidden="true" />
-              </button>
-            </div>
-          ) : null
+                  aria-pressed={sessionSnippetsOpen && !hostDetail}
+                  onClick={() => {
+                    if (sessionSnippetsOpen && !hostDetail) {
+                      setSessionSnippets(false);
+                      return;
+                    }
+                    setHostDetail(null);
+                    setSnippetDetail(null);
+                    setSessionSnippets(true);
+                  }}
+                >
+                  <LuPanelRight size={15} aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
+          </div>
         }
       >
         <div className="tabbar" onContextMenu={(e) => openCtxMenu(e, null)}>
@@ -1721,6 +1726,8 @@ export default function App() {
           <RightDrawer
             onRun={runSnippet}
             onClose={() => setSessionSnippets(false)}
+            connectionKey={focusedConnectionKey}
+            connectionLabel={connectionLabel(focusedConnectionKey)}
           />
         )}
       </div>

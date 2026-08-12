@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
+import {
+  APP_THEME_EVENT,
+  getResolvedAppAppearance,
+} from './appTheme.js';
 
 let sshLanguageRegistered = false;
 
@@ -46,6 +50,19 @@ export function ConfigEditorPane({ active, onHostsChanged }) {
   const editorRef = useRef(null);
 
   const dirty = content !== original;
+  const [monacoTheme, setMonacoTheme] = useState(() =>
+    getResolvedAppAppearance() === 'light' ? 'vs' : 'vs-dark'
+  );
+
+  useEffect(() => {
+    const sync = () => {
+      setMonacoTheme(
+        getResolvedAppAppearance() === 'light' ? 'vs' : 'vs-dark'
+      );
+    };
+    window.addEventListener(APP_THEME_EVENT, sync);
+    return () => window.removeEventListener(APP_THEME_EVENT, sync);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -157,7 +174,7 @@ export function ConfigEditorPane({ active, onHostsChanged }) {
         ) : (
           <Editor
             height="100%"
-            theme="vs-dark"
+            theme={monacoTheme}
             language="sshconfig"
             value={content}
             onChange={(v) => setContent(v ?? '')}
