@@ -4,11 +4,15 @@ import {
   TERM_FONT_SIZE_MIN,
   TERM_FONT_SIZE_MAX,
   TERM_THEME_EVENT,
-  getTermThemeId,
+  LOCAL_CONNECTION_KEY,
+  getConnectionTermThemeId,
+  getEffectiveTermThemeId,
   getTermFontSize,
-  setTermThemeId,
+  setConnectionTermThemeId,
   setTermFontSize,
+  connectionLabel as defaultConnectionLabel,
 } from './terminalThemes.js';
+import { APP_THEME_EVENT } from './appTheme.js';
 
 function ThemePreview({ theme }) {
   return (
@@ -30,35 +34,84 @@ function ThemePreview({ theme }) {
   );
 }
 
-export function ThemesPanel() {
-  const [themeId, setThemeId] = useState(() => getTermThemeId());
+export function ThemesPanel({
+  connectionKey = LOCAL_CONNECTION_KEY,
+  connectionLabel: labelProp,
+}) {
+  const label =
+    labelProp || defaultConnectionLabel(connectionKey);
+  const [followApp, setFollowApp] = useState(
+    () => !getConnectionTermThemeId(connectionKey)
+  );
+  const [themeId, setThemeId] = useState(() =>
+    getEffectiveTermThemeId(connectionKey)
+  );
   const [fontSize, setFontSize] = useState(() => getTermFontSize());
 
   useEffect(() => {
-    const onTheme = (e) => {
-      if (e?.detail?.id) setThemeId(e.detail.id);
-      if (e?.detail?.fontSize) setFontSize(e.detail.fontSize);
+    setFollowApp(!getConnectionTermThemeId(connectionKey));
+    setThemeId(getEffectiveTermThemeId(connectionKey));
+  }, [connectionKey]);
+
+  useEffect(() => {
+    const sync = () => {
+      setFollowApp(!getConnectionTermThemeId(connectionKey));
+      setThemeId(getEffectiveTermThemeId(connectionKey));
+      setFontSize(getTermFontSize());
     };
-    window.addEventListener(TERM_THEME_EVENT, onTheme);
-    return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
-  }, []);
+    const onTerm = (e) => {
+      if (e?.detail?.fontSize) setFontSize(e.detail.fontSize);
+      const key = e?.detail?.connectionKey;
+      if (
+        e?.detail?.appAppearanceChanged ||
+        e?.detail?.globalFont ||
+        key == null ||
+        key === connectionKey
+      ) {
+        sync();
+      }
+    };
+    window.addEventListener(TERM_THEME_EVENT, onTerm);
+    window.addEventListener(APP_THEME_EVENT, sync);
+    return () => {
+      window.removeEventListener(TERM_THEME_EVENT, onTerm);
+      window.removeEventListener(APP_THEME_EVENT, sync);
+    };
+  }, [connectionKey]);
 
   return (
     <div className="themes-panel">
       <div className="themes-panel-header">
         <div className="detail-panel-title">Themes</div>
-        <div className="detail-panel-sub">Terminal appearance</div>
+        <div className="detail-panel-sub">
+          Terminal theme for {label}
+        </div>
       </div>
 
       <div className="themes-list">
+        <button
+          type="button"
+          className={`theme-row ${followApp ? 'selected' : ''}`}
+          onClick={() => setConnectionTermThemeId(connectionKey, null)}
+        >
+          <div className="theme-swatch theme-swatch-follow" aria-hidden="true">
+            <span className="theme-swatch-text">Auto</span>
+          </div>
+          <span className="theme-row-name">Follow app theme</span>
+          {followApp ? (
+            <span className="theme-row-check" aria-hidden="true">
+              ✓
+            </span>
+          ) : null}
+        </button>
         {TERMINAL_THEMES.map((item) => {
-          const selected = item.id === themeId;
+          const selected = !followApp && item.id === themeId;
           return (
             <button
               key={item.id}
               type="button"
               className={`theme-row ${selected ? 'selected' : ''}`}
-              onClick={() => setTermThemeId(item.id)}
+              onClick={() => setConnectionTermThemeId(connectionKey, item.id)}
             >
               <ThemePreview theme={item.theme} />
               <span className="theme-row-name">{item.label}</span>

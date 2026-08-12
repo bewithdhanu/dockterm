@@ -9,10 +9,13 @@ import { MAX_SCROLLBACK_ROWS } from './sessionPersist.js';
 import {
   TERM_THEME_EVENT,
   TERM_FONT_FAMILY,
-  applyTermBgCssVar,
-  getTermTheme,
+  applyTermThemeCssVars,
+  connectionKeyFromPane,
+  getConnectionTermThemeId,
+  getEffectiveTermTheme,
   getTermFontSize,
 } from './terminalThemes.js';
+import { APP_THEME_EVENT } from './appTheme.js';
 import { appendCommandHistory } from './commandHistory.js';
 
 function stripAnsi(text) {
@@ -358,11 +361,11 @@ function deriveSshBanner(text, mode, host, opts = {}) {
   };
 }
 
-function applyConnectingCursor(term, connecting) {
+function applyConnectingCursor(term, connecting, theme) {
   if (!term) return;
   try {
     term.options.cursorBlink = !connecting;
-    const base = getTermTheme();
+    const base = theme || getEffectiveTermTheme(connectionKeyFromPane(null));
     if (connecting) {
       // Match bg so any leftover cursor draw is invisible (xterm rejects "transparent").
       const bg = base.background || '#000000';
@@ -507,6 +510,7 @@ export function TerminalPane({
 
   // Keep divert flag in sync with SSH lifecycle.
   useEffect(() => {
+    const theme = getEffectiveTermTheme(connectionKeyFromPane(sshHost));
     if (!isSsh) {
       divertRef.current = false;
       return;
@@ -520,7 +524,7 @@ export function TerminalPane({
       setElapsedSec(0);
       pipelineProgressRef.current = 0;
       setPipelineProgress(0);
-      applyConnectingCursor(termRef.current, true);
+      applyConnectingCursor(termRef.current, true, theme);
       try {
         termRef.current?.blur();
       } catch {
@@ -533,7 +537,7 @@ export function TerminalPane({
       });
     } else if (sshStatus === 'error') {
       divertRef.current = false;
-      applyConnectingCursor(termRef.current, true);
+      applyConnectingCursor(termRef.current, true, theme);
       try {
         termRef.current?.blur();
       } catch {
@@ -549,7 +553,7 @@ export function TerminalPane({
     } else if (sshStatus === 'connected' && !finishedConnectRef.current) {
       finishedConnectRef.current = true;
       divertRef.current = false;
-      applyConnectingCursor(termRef.current, false);
+      applyConnectingCursor(termRef.current, false, theme);
       setConnectStartedAt(null);
       const term = termRef.current;
       const raw = connectLogRef.current;
@@ -575,7 +579,7 @@ export function TerminalPane({
         /* ignore */
       }
     } else if (sshStatus === 'connected') {
-      applyConnectingCursor(termRef.current, false);
+      applyConnectingCursor(termRef.current, false, theme);
       setConnectStartedAt(null);
     }
   }, [isSsh, sshStatus, sshHost, id]);
@@ -585,14 +589,15 @@ export function TerminalPane({
     const el = containerRef.current;
     if (!el) return;
 
-    applyTermBgCssVar();
+    const connKey = connectionKeyFromPane(sshHostRef.current);
+    const baseTheme = getEffectiveTermTheme(connKey);
+    if (activeRef.current) applyTermThemeCssVars(baseTheme);
 
     const connecting = Boolean(
       isSsh &&
         (sshStatusRef.current === 'connecting' ||
           sshStatusRef.current === 'error')
     );
-    const baseTheme = getTermTheme();
     const hideCursorTheme = connecting
       ? {
           ...baseTheme,
@@ -894,13 +899,11 @@ export function TerminalPane({
   }, [id, registerHandlers, registerSerializer, isSsh, sshHost]);
 
   useEffect(() => {
-    const onTheme = (e) => {
+    const applyThemeToTerm = (theme, fontSize) => {
       const term = termRef.current;
       const fit = fitRef.current;
       if (!term) return;
       try {
-        const theme = e?.detail?.theme || getTermTheme();
-        const fontSize = e?.detail?.fontSize || getTermFontSize();
         const connecting =
           isSsh &&
           (sshStatusRef.current === 'connecting' ||
@@ -911,8 +914,9 @@ export function TerminalPane({
           : theme;
         term.options.cursorBlink = !connecting;
         term.options.fontFamily = TERM_FONT_FAMILY;
-        term.options.fontSize = fontSize;
+        if (fontSize) term.options.fontSize = fontSize;
         term.refresh(0, term.rows - 1);
+        if (activeRef.current) applyTermThemeCssVars(theme);
         if (fit) {
           fit.fit();
           sendRef.current({
@@ -926,9 +930,61 @@ export function TerminalPane({
         /* ignore */
       }
     };
+
+    const onTheme = (e) => {
+      const connKey = connectionKeyFromPane(sshHostRef.current);
+      const detail = e?.detail || {};
+      const fontSize = detail.fontSize || getTermFontSize();
+
+      if (detail.globalFont && !detail.appAppearanceChanged && !detail.connectionKey) {
+        applyThemeToTerm(getEffectiveTermTheme(connKey), fontSize);
+        return;
+      }
+
+      if (detail.appAppearanceChanged) {
+        if (getConnectionTermThemeId(connKey)) {
+          if (detail.fontSize) {
+            const term = termRef.current;
+            if (term) term.options.fontSize = fontSize;
+          }
+          return;
+        }
+        applyThemeToTerm(getEffectiveTermTheme(connKey), fontSize);
+        return;
+      }
+
+      if (detail.connectionKey != null && detail.connectionKey !== connKey) {
+        return;
+      }
+
+      const theme =
+        detail.theme && detail.connectionKey === connKey
+          ? detail.theme
+          : getEffectiveTermTheme(connKey);
+      applyThemeToTerm(theme, fontSize);
+    };
+
+    const onAppTheme = () => {
+      const connKey = connectionKeyFromPane(sshHostRef.current);
+      if (getConnectionTermThemeId(connKey)) return;
+      applyThemeToTerm(getEffectiveTermTheme(connKey), getTermFontSize());
+    };
+
     window.addEventListener(TERM_THEME_EVENT, onTheme);
-    return () => window.removeEventListener(TERM_THEME_EVENT, onTheme);
+    window.addEventListener(APP_THEME_EVENT, onAppTheme);
+    return () => {
+      window.removeEventListener(TERM_THEME_EVENT, onTheme);
+      window.removeEventListener(APP_THEME_EVENT, onAppTheme);
+    };
   }, [id, isSsh]);
+
+  // Focused pane drives document --term-* vars for footer / session seam.
+  useEffect(() => {
+    if (!active) return;
+    applyTermThemeCssVars(
+      getEffectiveTermTheme(connectionKeyFromPane(sshHost))
+    );
+  }, [active, sshHost]);
 
   useEffect(() => {
     if (!visible) return;

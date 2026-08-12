@@ -1,9 +1,9 @@
 {
   "name": "dockterm",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": false,
   "type": "module",
-  "description": "SSH workspace for macOS, Windows & Linux — custom ~/.ssh/config hosts, snippets, command history, multi-tab sessions, and process tools",
+  "description": "SSH workspace for macOS, Windows & Linux \u2014 custom ~/.ssh/config hosts, snippets, command history, multi-tab sessions, and process tools",
   "author": "DockTerm",
   "license": "MIT",
   "homepage": "https://bewithdhanu.github.io/dockterm/",

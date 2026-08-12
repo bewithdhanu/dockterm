@@ -1,5 +1,14 @@
+import { getResolvedAppAppearance } from './appTheme.js';
+
+/** @deprecated Legacy global key — ignored; defaults follow app appearance. */
 const THEME_KEY = 'dockterm.term-theme';
+const CONNECTION_THEME_KEY = 'dockterm.term-theme-by-connection';
 export const TERM_THEME_EVENT = 'dockterm-term-theme';
+
+/** Local (non-SSH) shells share one remembered terminal theme. */
+export const LOCAL_CONNECTION_KEY = '__local__';
+export const DARK_DEFAULT_TERM_THEME_ID = 'dockterm';
+export const LIGHT_DEFAULT_TERM_THEME_ID = 'light';
 
 /** @typedef {{
  *  id: string,
@@ -239,6 +248,80 @@ export const TERMINAL_THEMES = [
   },
 ];
 
+export function connectionKeyFromPane(sshAlias) {
+  const a = String(sshAlias || '').trim();
+  return a || LOCAL_CONNECTION_KEY;
+}
+
+export function connectionLabel(connectionKey) {
+  if (!connectionKey || connectionKey === LOCAL_CONNECTION_KEY) return 'Local';
+  return connectionKey;
+}
+
+/** @returns {Record<string, string>} */
+function readConnectionThemeMap() {
+  try {
+    const raw = localStorage.getItem(CONNECTION_THEME_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    /** @type {Record<string, string>} */
+    const out = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (
+        typeof key === 'string' &&
+        typeof value === 'string' &&
+        TERMINAL_THEMES.some((t) => t.id === value)
+      ) {
+        out[key] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeConnectionThemeMap(map) {
+  try {
+    localStorage.setItem(CONNECTION_THEME_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Override theme id for a connection, or null if following app. */
+export function getConnectionTermThemeId(connectionKey) {
+  const key = connectionKey || LOCAL_CONNECTION_KEY;
+  return readConnectionThemeMap()[key] || null;
+}
+
+export function getDefaultTermThemeId(
+  appearance = getResolvedAppAppearance()
+) {
+  return appearance === 'light'
+    ? LIGHT_DEFAULT_TERM_THEME_ID
+    : DARK_DEFAULT_TERM_THEME_ID;
+}
+
+export function getEffectiveTermThemeId(connectionKey) {
+  const override = getConnectionTermThemeId(connectionKey);
+  if (override) return override;
+  return getDefaultTermThemeId();
+}
+
+/** Catalog lookup; defaults to dark DockTerm palette. */
+export function getTermTheme(id = DARK_DEFAULT_TERM_THEME_ID) {
+  return (
+    TERMINAL_THEMES.find((t) => t.id === id) || TERMINAL_THEMES[0]
+  ).theme;
+}
+
+export function getEffectiveTermTheme(connectionKey) {
+  return getTermTheme(getEffectiveTermThemeId(connectionKey));
+}
+
+/** @deprecated Use getEffectiveTermThemeId / getDefaultTermThemeId. */
 export function getTermThemeId() {
   try {
     const id = localStorage.getItem(THEME_KEY);
@@ -246,13 +329,7 @@ export function getTermThemeId() {
   } catch {
     /* ignore */
   }
-  return 'dockterm';
-}
-
-export function getTermTheme(id = getTermThemeId()) {
-  return (
-    TERMINAL_THEMES.find((t) => t.id === id) || TERMINAL_THEMES[0]
-  ).theme;
+  return getDefaultTermThemeId();
 }
 
 export function getTermFontSize() {
@@ -282,14 +359,39 @@ export function setTermFontSize(size) {
   } catch {
     /* ignore */
   }
-  dispatchAppearance({ fontSize: next });
+  window.dispatchEvent(
+    new CustomEvent(TERM_THEME_EVENT, {
+      detail: {
+        globalFont: true,
+        fontFamily: TERM_FONT_FAMILY,
+        fontSize: next,
+      },
+    })
+  );
   return next;
 }
 
 function appearanceDetail(overrides = {}) {
+  const hasKey = Object.prototype.hasOwnProperty.call(
+    overrides,
+    'connectionKey'
+  );
+  const connectionKey = hasKey
+    ? overrides.connectionKey
+    : LOCAL_CONNECTION_KEY;
+  const id =
+    overrides.id != null
+      ? overrides.id
+      : connectionKey
+        ? getEffectiveTermThemeId(connectionKey)
+        : getDefaultTermThemeId();
   return {
-    id: getTermThemeId(),
-    theme: getTermTheme(),
+    connectionKey,
+    id,
+    theme: overrides.theme || getTermTheme(id),
+    followApp: connectionKey
+      ? !getConnectionTermThemeId(connectionKey)
+      : true,
     fontFamily: TERM_FONT_FAMILY,
     fontSize: getTermFontSize(),
     ...overrides,
@@ -302,20 +404,52 @@ function dispatchAppearance(detail) {
   );
 }
 
-export function setTermThemeId(id) {
-  const next = TERMINAL_THEMES.some((t) => t.id === id) ? id : 'dockterm';
-  try {
-    localStorage.setItem(THEME_KEY, next);
-  } catch {
-    /* ignore */
+/**
+ * Set or clear a per-connection terminal theme.
+ * @param {string} connectionKey
+ * @param {string | null} id Theme id, or null to follow app light/dark default
+ */
+export function setConnectionTermThemeId(connectionKey, id) {
+  const key = connectionKey || LOCAL_CONNECTION_KEY;
+  const map = readConnectionThemeMap();
+  if (id == null || id === '' || id === 'follow-app') {
+    delete map[key];
+  } else if (TERMINAL_THEMES.some((t) => t.id === id)) {
+    map[key] = id;
+  } else {
+    delete map[key];
   }
-  const theme = getTermTheme(next);
-  applyTermThemeCssVars(theme);
-  dispatchAppearance({ id: next, theme });
-  return next;
+  writeConnectionThemeMap(map);
+  const effectiveId = getEffectiveTermThemeId(key);
+  const theme = getTermTheme(effectiveId);
+  dispatchAppearance({
+    connectionKey: key,
+    id: effectiveId,
+    theme,
+    followApp: !getConnectionTermThemeId(key),
+  });
+  return effectiveId;
 }
 
-/** Push terminal palette into CSS vars (terminal + footer). */
+/** @deprecated Prefer setConnectionTermThemeId for a specific connection. */
+export function setTermThemeId(id) {
+  return setConnectionTermThemeId(LOCAL_CONNECTION_KEY, id);
+}
+
+/** Notify panes that follow app defaults after app appearance changes. */
+export function notifyAppAppearanceAffectsTerminals() {
+  window.dispatchEvent(
+    new CustomEvent(TERM_THEME_EVENT, {
+      detail: {
+        appAppearanceChanged: true,
+        fontFamily: TERM_FONT_FAMILY,
+        fontSize: getTermFontSize(),
+      },
+    })
+  );
+}
+
+/** Push terminal palette into CSS vars (focused pane / footer). */
 export function applyTermThemeCssVars(theme = getTermTheme()) {
   try {
     const root = document.documentElement.style;
@@ -344,124 +478,6 @@ export function applyTermThemeCssVars(theme = getTermTheme()) {
   }
 }
 
-/** DockTerm chrome defaults (hosts / non-session views). */
-export const APP_CHROME_DEFAULTS = {
-  '--bg': '#1a1c23',
-  '--bg-elevated': '#20232c',
-  '--panel': '#242832',
-  '--panel-2': '#2a2e38',
-  '--border': '#323644',
-  '--text': '#e8eaef',
-  '--muted': '#b4bac8',
-  '--accent': '#3b82f6',
-  '--accent-soft': 'rgba(59, 130, 246, 0.18)',
-  '--tab': '#2a2e38',
-  '--tab-active': '#323644',
-  '--scrollbar-thumb': '#3a3f4d',
-  '--scrollbar-thumb-hover': '#525868',
-};
-
-function mixHex(a, b, t) {
-  const parse = (hex) => {
-    const h = String(hex || '').replace('#', '');
-    if (h.length !== 6) return null;
-    return [
-      parseInt(h.slice(0, 2), 16),
-      parseInt(h.slice(2, 4), 16),
-      parseInt(h.slice(4, 6), 16),
-    ];
-  };
-  const A = parse(a);
-  const B = parse(b);
-  if (!A || !B) return a;
-  const c = A.map((v, i) => Math.round(v + (B[i] - v) * t));
-  return `#${c.map((n) => n.toString(16).padStart(2, '0')).join('')}`;
-}
-
-function hexToRgba(hex, alpha) {
-  const h = String(hex || '').replace('#', '');
-  if (h.length !== 6) return `rgba(59, 130, 246, ${alpha})`;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function hexLuminance(hex) {
-  const h = String(hex || '').replace('#', '');
-  if (h.length !== 6) return 0;
-  const r = parseInt(h.slice(0, 2), 16) / 255;
-  const g = parseInt(h.slice(2, 4), 16) / 255;
-  const b = parseInt(h.slice(4, 6), 16) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** Map terminal palette onto app chrome CSS vars. */
-export function applyAppChromeFromTermTheme(theme = getTermTheme()) {
-  try {
-    const root = document.documentElement.style;
-    const bg = theme.background || APP_CHROME_DEFAULTS['--bg'];
-    const fg = theme.foreground || APP_CHROME_DEFAULTS['--text'];
-    const light = hexLuminance(bg) > 0.55;
-    const baseMuted = theme.brightBlack || APP_CHROME_DEFAULTS['--muted'];
-    // Dark themes: brightBlack is often too dim. Light themes: keep muted darker.
-    const muted = light
-      ? mixHex(baseMuted, fg, 0.2) || mixHex(fg, bg, 0.38)
-      : mixHex(baseMuted, fg, 0.42) ||
-        mixHex(bg, fg, 0.58) ||
-        APP_CHROME_DEFAULTS['--muted'];
-    const accent = theme.blue || theme.cursor || APP_CHROME_DEFAULTS['--accent'];
-    // Panels sit clearly above the terminal/editor background.
-    const panel = mixHex(bg, fg, light ? 0.05 : 0.09) || theme.black || bg;
-    const panel2 = mixHex(bg, fg, light ? 0.09 : 0.14) || panel;
-    const elevated = mixHex(bg, fg, light ? 0.03 : 0.06) || bg;
-    const border = mixHex(bg, fg, light ? 0.14 : 0.18) || muted;
-    document.documentElement.style.colorScheme = light ? 'light' : 'dark';
-    root.setProperty('--bg', bg);
-    root.setProperty('--bg-elevated', elevated);
-    root.setProperty('--panel', panel);
-    root.setProperty('--panel-2', panel2);
-    root.setProperty('--border', border);
-    root.setProperty('--text', fg);
-    root.setProperty('--muted', muted);
-    root.setProperty('--accent', accent);
-    root.setProperty('--accent-soft', hexToRgba(accent, light ? 0.14 : 0.18));
-    root.setProperty('--tab', panel2);
-    root.setProperty('--tab-active', border);
-    root.setProperty('--scrollbar-thumb', mixHex(bg, fg, light ? 0.22 : 0.25));
-    root.setProperty(
-      '--scrollbar-thumb-hover',
-      mixHex(bg, fg, light ? 0.32 : 0.36)
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-export function applyAppChromeDefaults() {
-  try {
-    const root = document.documentElement.style;
-    document.documentElement.style.colorScheme = 'dark';
-    for (const [key, value] of Object.entries(APP_CHROME_DEFAULTS)) {
-      root.setProperty(key, value);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
- * Hosts / nav screens stay on DockTerm chrome.
- * Session (local terminal or SSH) applies the selected terminal theme app-wide.
- */
-export function syncAppChromeForView(mainView) {
-  if (mainView === 'session') {
-    applyAppChromeFromTermTheme(getTermTheme());
-  } else {
-    applyAppChromeDefaults();
-  }
-}
-
 export function applyTermFontCssVar(fontFamily = TERM_FONT_FAMILY) {
   try {
     document.documentElement.style.setProperty('--font-mono', fontFamily);
@@ -470,7 +486,7 @@ export function applyTermFontCssVar(fontFamily = TERM_FONT_FAMILY) {
   }
 }
 
-export function applyTermBgCssVar() {
-  applyTermThemeCssVars();
+export function applyTermBgCssVar(connectionKey = LOCAL_CONNECTION_KEY) {
+  applyTermThemeCssVars(getEffectiveTermTheme(connectionKey));
   applyTermFontCssVar();
 }
