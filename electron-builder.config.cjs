@@ -42,6 +42,22 @@ module.exports = {
     entitlements: 'build/entitlements.mac.plist',
     entitlementsInherit: 'build/entitlements.mac.plist',
     notarize: false,
+    extendInfo: {
+      CFBundleURLTypes: [
+        {
+          CFBundleURLName: 'DockTerm folder open',
+          CFBundleURLSchemes: ['dockterm'],
+        },
+      ],
+      CFBundleDocumentTypes: [
+        {
+          CFBundleTypeName: 'Folder',
+          CFBundleTypeRole: 'Viewer',
+          LSHandlerRank: 'Alternate',
+          LSItemContentTypes: ['public.folder'],
+        },
+      ],
+    },
   },
   afterSign: 'scripts/notarize.cjs',
   win: {

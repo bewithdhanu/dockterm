@@ -18,7 +18,7 @@ import { RightDrawer } from './RightDrawer.jsx';
 import { ConfigEditorPane } from './ConfigEditorPane.jsx';
 import { MAX_PANES, TerminalSplitView } from './TerminalSplitView.jsx';
 import { clearSession, saveSession } from './sessionPersist.js';
-import { endsWithShellPrompt } from './shellPrompt.js';
+import { endsWithShellPrompt, looksLikeSshSessionReady } from './shellPrompt.js';
 import { nextCopyAlias, useSshHosts } from './useSshHosts.js';
 import { useHostOs } from './useHostOs.js';
 import {
@@ -77,6 +77,8 @@ export default function App() {
   const closedStackRef = useRef([]);
   /** Rolling SSH output used to detect first shell prompt (connecting → connected). */
   const sshPromptBufRef = useRef(new Map());
+  /** When each SSH pane entered connecting (for ready fallback). */
+  const sshConnectAtRef = useRef(new Map());
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
@@ -109,6 +111,56 @@ export default function App() {
       tab.panes?.find((p) => p.id === tab.focusedPaneId) || tab.panes?.[0];
     return connectionKeyFromPane(pane?.ssh);
   }, [tabs, activeId]);
+
+  // If SSH output already includes a shell prompt but no further chunks arrive
+  // (common after MOTD), promote connecting → connected on a short poll.
+  useEffect(() => {
+    const tick = () => {
+      const promote = [];
+      for (const t of tabsRef.current) {
+        if (t.kind !== 'terminal' || !t.panes) continue;
+        for (const p of t.panes) {
+          if (!p.ssh || p.sshStatus !== 'connecting' || p.alive === false) {
+            continue;
+          }
+          const buf = sshPromptBufRef.current.get(p.id) || '';
+          if (!buf) continue;
+          const started = sshConnectAtRef.current.get(p.id) || Date.now();
+          const elapsed = Date.now() - started;
+          if (
+            endsWithShellPrompt(buf) ||
+            looksLikeSshSessionReady(buf, elapsed)
+          ) {
+            promote.push(p.id);
+          }
+        }
+      }
+      if (!promote.length) return;
+      for (const id of promote) {
+        sshPromptBufRef.current.delete(id);
+        sshConnectAtRef.current.delete(id);
+      }
+      setTabs((prevTabs) =>
+        prevTabs.map((t) => {
+          if (t.kind !== 'terminal' || !t.panes) return t;
+          let changed = false;
+          const panes = t.panes.map((p) => {
+            if (
+              promote.includes(p.id) &&
+              p.sshStatus === 'connecting'
+            ) {
+              changed = true;
+              return { ...p, sshStatus: 'connected' };
+            }
+            return p;
+          });
+          return changed ? { ...t, panes } : t;
+        })
+      );
+    };
+    const id = window.setInterval(tick, 750);
+    return () => window.clearInterval(id);
+  }, []);
 
   const registerHandlers = useCallback((id, handlers) => {
     handlersRef.current.set(id, handlers);
@@ -364,6 +416,10 @@ export default function App() {
             sshStatus: isSsh ? 'connecting' : null,
           };
 
+          if (isSsh) {
+            sshConnectAtRef.current.set(msg.id, Date.now());
+          }
+
           if (pending?.restore?.tabId) {
             const { tabId, paneIndex } = pending.restore;
             if (restorePendingRef.current > 0) {
@@ -488,11 +544,20 @@ export default function App() {
             pane.sshStatus === 'connecting' &&
             pane.alive !== false
           ) {
+            if (!sshConnectAtRef.current.has(msg.id)) {
+              sshConnectAtRef.current.set(msg.id, Date.now());
+            }
             const prev = sshPromptBufRef.current.get(msg.id) || '';
             const next = (prev + String(msg.data || '')).slice(-8000);
             sshPromptBufRef.current.set(msg.id, next);
-            if (endsWithShellPrompt(next)) {
+            const elapsed =
+              Date.now() - (sshConnectAtRef.current.get(msg.id) || Date.now());
+            if (
+              endsWithShellPrompt(next) ||
+              looksLikeSshSessionReady(next, elapsed)
+            ) {
               sshPromptBufRef.current.delete(msg.id);
+              sshConnectAtRef.current.delete(msg.id);
               setTabs((prevTabs) =>
                 prevTabs.map((t) => {
                   if (t.kind !== 'terminal') return t;
@@ -515,6 +580,7 @@ export default function App() {
         if (msg.type === 'exit') {
           handlersRef.current.get(msg.id)?.onExit?.(msg.exitCode);
           sshPromptBufRef.current.delete(msg.id);
+          sshConnectAtRef.current.delete(msg.id);
 
           const owner = tabsRef.current.find(
             (t) =>
@@ -595,6 +661,22 @@ export default function App() {
     },
     [requestCreate]
   );
+
+  // Finder / CLI: open a local terminal tab at a folder.
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.dockterm : null;
+    if (!api?.onOpenFolder) return undefined;
+    return api.onOpenFolder((payload) => {
+      const cwd = String(payload?.cwd || '').trim();
+      if (!cwd) return;
+      const parts = cwd.split(/[/\\]/).filter(Boolean);
+      const title = parts[parts.length - 1] || 'Terminal';
+      setHostDetail(null);
+      setSnippetDetail(null);
+      setHistoryDetail(null);
+      addTab({ cwd, title });
+    });
+  }, [addTab]);
 
   const splitActive = useCallback(
     (direction, groupIdArg) => {
