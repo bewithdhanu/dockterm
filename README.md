@@ -88,6 +88,23 @@ macOS builds are **ad-hoc signed** (no $99 Apple fee). First open may ask you to
 
 Details: [docs/macos-signing.md](./docs/macos-signing.md).
 
+### Open folder from Finder (macOS)
+
+1. Open DockTerm → menu **DockTerm → Install Finder Menu Items…** (installs Automator Quick Actions into `~/Library/Services`)
+2. In Finder, right-click a folder → **Quick Actions** / **Services**:
+   - **New DockTerm Tab at Folder** — opens a local terminal tab in the existing window
+   - **New DockTerm at Folder** — opens a new DockTerm window at that folder
+3. If an old broken service dialog appears, run **Install Finder Menu Items…** again (it replaces the previous AppleScript `.app` services)
+
+CLI / protocol equivalents:
+
+```bash
+open -na DockTerm.app --args --new-tab "/path/to/folder"
+open -na DockTerm.app --args --new-window "/path/to/folder"
+open "dockterm://new-tab?path=/path/to/folder"
+open "dockterm://new-window?path=/path/to/folder"
+```
+
 **Looking for sponsors:** help cover the Apple Developer Program ($99/year) so future macOS releases can be notarized and open with a double-click. [Get in touch →](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest)
 
 ## Quick start (development)

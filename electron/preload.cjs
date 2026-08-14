@@ -50,4 +50,22 @@ contextBridge.exposeInMainWorld('dockterm', {
   clipboardWrite: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   clipboardRead: () => ipcRenderer.invoke('clipboard:readText'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  installFinderServices: () => ipcRenderer.invoke('finder:installServices'),
+  onOpenFolder: (handler) => {
+    const listener = (_event, payload) => {
+      try {
+        handler?.(payload);
+      } catch {
+        /* ignore */
+      }
+    };
+    ipcRenderer.on('dockterm:open-folder', listener);
+    return () => {
+      try {
+        ipcRenderer.removeListener('dockterm:open-folder', listener);
+      } catch {
+        /* ignore */
+      }
+    };
+  },
 });

@@ -1,15 +1,25 @@
-const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { spawn, execFileSync } = require('child_process');
+const {
+  parseOpenRequestsFromArgv,
+  parseOpenRequestFromUrl,
+  installFinderServices,
+} = require('./folderOpen.cjs');
 
 /** @type {import('electron').BrowserWindow | null} */
-let mainWindow = null;
+let primaryWindow = null;
+/** @type {Set<import('electron').BrowserWindow>} */
+const windows = new Set();
 /** @type {import('child_process').ChildProcess | null} */
 let serverProc = null;
 let serverPort = null;
 let isQuitting = false;
+
+/** @type {{ mode: 'tab' | 'window', cwd: string }[]} */
+let pendingFolderOpens = [];
 
 const PREFERRED_PORT = 39281;
 const SERVER_BOOT_MS = 45000;
@@ -337,18 +347,124 @@ async function ensureBackend() {
   throw lastErr || new Error('DockTerm server did not start');
 }
 
-function hideMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function hidePrimaryWindow() {
+  if (!primaryWindow || primaryWindow.isDestroyed()) return;
   // Close = hide window; keep UI process + backend + WS alive until Quit.
-  if (!mainWindow.isVisible()) return;
-  mainWindow.hide();
+  if (!primaryWindow.isVisible()) return;
+  primaryWindow.hide();
 }
 
-function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+function showWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function showPrimaryWindow() {
+  showWindow(primaryWindow);
+}
+
+function anyLiveWindow() {
+  for (const win of windows) {
+    if (win && !win.isDestroyed()) return win;
+  }
+  return null;
+}
+
+function normalizeFolderPath(cwd) {
+  try {
+    const resolved = path.resolve(String(cwd || '').trim());
+    if (!resolved) return null;
+    if (!fs.existsSync(resolved)) return null;
+    const st = fs.statSync(resolved);
+    return st.isDirectory() ? resolved : path.dirname(resolved);
+  } catch {
+    return null;
+  }
+}
+
+function sendOpenFolderToWindow(win, request) {
+  if (!win || win.isDestroyed()) return false;
+  const cwd = normalizeFolderPath(request.cwd);
+  if (!cwd) return false;
+  const payload = { mode: request.mode || 'tab', cwd };
+  const send = () => {
+    try {
+      win.webContents.send('dockterm:open-folder', payload);
+    } catch (err) {
+      logLine(`open-folder send failed: ${err?.message || err}`);
+    }
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(send, 250);
+    });
+  } else {
+    setTimeout(send, 80);
+  }
+  showWindow(win);
+  return true;
+}
+
+async function enqueueFolderOpens(requests) {
+  const list = (requests || [])
+    .map((r) => ({
+      mode: r.mode === 'window' ? 'window' : 'tab',
+      cwd: normalizeFolderPath(r.cwd),
+    }))
+    .filter((r) => r.cwd);
+  if (!list.length) return;
+
+  for (const req of list) {
+    if (req.mode === 'window') {
+      try {
+        const win = await createWindow({
+          primary: !anyLiveWindow(),
+        });
+        sendOpenFolderToWindow(win, req);
+      } catch (err) {
+        logLine(`new-window open failed: ${err?.message || err}`);
+        pendingFolderOpens.push(req);
+      }
+      continue;
+    }
+
+    let win = anyLiveWindow();
+    if (!win) {
+      pendingFolderOpens.push(req);
+      try {
+        win = await createWindow({ primary: true });
+      } catch (err) {
+        logLine(`create window for tab open failed: ${err?.message || err}`);
+        continue;
+      }
+    }
+    sendOpenFolderToWindow(win, req);
+  }
+}
+
+function flushPendingFolderOpens(win) {
+  if (!pendingFolderOpens.length || !win || win.isDestroyed()) return;
+  const queued = pendingFolderOpens.slice();
+  pendingFolderOpens = [];
+  // Cold start: first request (tab or window) lands in the primary window.
+  // Extra --new-window requests still spawn additional windows.
+  let assignedPrimary = false;
+  for (const req of queued) {
+    if (req.mode === 'window' && assignedPrimary) {
+      void enqueueFolderOpens([req]);
+      continue;
+    }
+    sendOpenFolderToWindow(win, req);
+    assignedPrimary = true;
+  }
+}
+
+function handleArgvOpens(argv) {
+  const reqs = parseOpenRequestsFromArgv(argv || []);
+  if (!reqs.length) return;
+  void enqueueFolderOpens(reqs);
 }
 
 function wireWindowControls() {
@@ -357,6 +473,7 @@ function wireWindowControls() {
   ipcMain.removeHandler('clipboard:writeText');
   ipcMain.removeHandler('clipboard:readText');
   ipcMain.removeHandler('shell:openExternal');
+  ipcMain.removeHandler('finder:installServices');
   ipcMain.removeAllListeners('window:minimize');
   ipcMain.removeAllListeners('window:maximize');
   ipcMain.removeAllListeners('window:close');
@@ -373,8 +490,8 @@ function wireWindowControls() {
   ipcMain.on('window:close', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
-    // Close = hide to background (do not quit / kill backend).
-    if (win === mainWindow) hideMainWindow();
+    // Primary window hides (background stay-alive); secondary windows destroy.
+    if (win === primaryWindow) hidePrimaryWindow();
     else win.close();
   });
   ipcMain.handle('window:isMaximized', (event) => {
@@ -390,12 +507,11 @@ function wireWindowControls() {
     return clipboard.readText();
   });
   ipcMain.handle('dialog:pickIdentityFile', async (event) => {
-    const { dialog } = require('electron');
     const win = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(win || undefined, {
       title: 'Select SSH identity file',
-      properties: ['openFile'],
-      defaultPath: require('os').homedir() + '/.ssh',
+      properties: ['openFile', 'showHiddenFiles'],
+      defaultPath: path.join(require('os').homedir(), '.ssh'),
     });
     if (result.canceled || !result.filePaths?.[0]) return null;
     return result.filePaths[0];
@@ -406,6 +522,9 @@ function wireWindowControls() {
     await shell.openExternal(target);
     return true;
   });
+  ipcMain.handle('finder:installServices', async () =>
+    installFinderServices(app.getPath('exe'))
+  );
 }
 
 /** http(s), mailto, and common app deep-links — reject javascript: etc. */
@@ -510,6 +629,27 @@ function installAppMenu() {
       submenu: [
         { role: 'about' },
         { type: 'separator' },
+        {
+          label: 'Install Finder Menu Items…',
+          click: () => {
+            const result = installFinderServices(app.getPath('exe'));
+            if (result.ok) {
+              dialog.showMessageBox({
+                type: 'info',
+                title: 'Finder menu items',
+                message: 'Finder menu items installed',
+                detail:
+                  'Right-click a folder in Finder → Quick Actions / Services:\n\n• New DockTerm Tab at Folder\n• New DockTerm at Folder\n\nIf they do not appear yet, log out/in or open System Settings → Keyboard → Keyboard Shortcuts → Services.',
+              });
+            } else {
+              dialog.showErrorBox(
+                'Could not install Finder menu items',
+                result.error || 'Unknown error'
+              );
+            }
+          },
+        },
+        { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
         { role: 'hide' },
@@ -542,6 +682,15 @@ function installAppMenu() {
     template.push({
       label: 'Window',
       submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            void createWindow({ primary: false }).catch((err) => {
+              logLine(`New Window failed: ${err?.message || err}`);
+            });
+          },
+        },
         { role: 'minimize' },
         { role: 'zoom' },
         { type: 'separator' },
@@ -551,7 +700,8 @@ function installAppMenu() {
           label: 'Close Window',
           accelerator: 'CmdOrCtrl+W',
           click: () => {
-            const win = BrowserWindow.getFocusedWindow() || mainWindow;
+            const win =
+              BrowserWindow.getFocusedWindow() || primaryWindow || anyLiveWindow();
             if (win && !win.isDestroyed()) win.close();
           },
         },
@@ -560,7 +710,19 @@ function installAppMenu() {
   } else {
     template.push({
       label: 'File',
-      submenu: [{ role: 'quit' }],
+      submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            void createWindow({ primary: false }).catch((err) => {
+              logLine(`New Window failed: ${err?.message || err}`);
+            });
+          },
+        },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
     });
   }
 
@@ -610,46 +772,65 @@ function wireContextMenu(win) {
   });
 }
 
-async function createWindow() {
-  mainWindow = new BrowserWindow(buildWindowOptions());
-  wireContextMenu(mainWindow);
-  wireTerminalEditShortcuts(mainWindow);
+/**
+ * @param {{ primary?: boolean }} [opts]
+ * @returns {Promise<import('electron').BrowserWindow>}
+ */
+async function createWindow(opts = {}) {
+  const asPrimary =
+    opts.primary !== false &&
+    (!primaryWindow || primaryWindow.isDestroyed());
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+  const win = new BrowserWindow(buildWindowOptions());
+  windows.add(win);
+  if (asPrimary) primaryWindow = win;
+
+  wireContextMenu(win);
+  wireTerminalEditShortcuts(win);
+
+  win.once('ready-to-show', () => {
+    win.show();
   });
 
   // xterm WebLinksAddon may call window.open() with no URL (about:blank).
   // Only forward real external targets; deny everything else.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalUrl(url)) {
       void shell.openExternal(url);
     }
     return { action: 'deny' };
   });
 
-  // Close / red traffic light → hide; keep backend + WS alive until Quit.
-  mainWindow.on('close', (e) => {
-    if (!isQuitting) {
+  win.on('close', (e) => {
+    if (isQuitting) return;
+    // Primary stays alive in the background; other windows close for real.
+    if (win === primaryWindow) {
       e.preventDefault();
-      hideMainWindow();
+      hidePrimaryWindow();
     }
   });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  win.on('closed', () => {
+    windows.delete(win);
+    if (primaryWindow === win) {
+      primaryWindow = anyLiveWindow();
+    }
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    const url = win.webContents.getURL() || '';
+    if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
+      flushPendingFolderOpens(win);
+    }
   });
 
   // Show splash immediately while backend boots.
   const splashPath = path.join(__dirname, 'splash.html');
-  await mainWindow.loadFile(splashPath);
+  await win.loadFile(splashPath);
 
-  try {
-    const port = await ensureBackend();
-    await mainWindow.loadURL(`http://127.0.0.1:${port}`);
-  } catch (err) {
-    throw err;
-  }
+  const port = await ensureBackend();
+  await win.loadURL(`http://127.0.0.1:${port}`);
+  return win;
 }
 
 function shutdown() {
@@ -664,60 +845,116 @@ function shutdown() {
   serverPort = null;
 }
 
-app.whenReady().then(() => {
-  wireWindowControls();
-  wireEditFocusTracking();
-  installAppMenu();
-  if (process.platform === 'darwin' && app.dock) {
-    const icon = resolveIcon();
-    if (icon) {
-      try {
-        app.dock.setIcon(icon);
-      } catch {
-        /* ignore */
+// Single instance so Finder "Tab" opens reuse the running app.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    handleArgvOpens(argv);
+    const win = anyLiveWindow();
+    if (win) showWindow(win);
+    else showPrimaryWindow();
+  });
+
+  // open-url can arrive before ready on macOS.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    const req = parseOpenRequestFromUrl(url);
+    if (req) {
+      if (app.isReady()) void enqueueFolderOpens([req]);
+      else pendingFolderOpens.push(req);
+    }
+  });
+
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    const cwd = normalizeFolderPath(filePath);
+    if (!cwd) return;
+    const req = { mode: 'tab', cwd };
+    if (app.isReady()) void enqueueFolderOpens([req]);
+    else pendingFolderOpens.push(req);
+  });
+
+  app.whenReady().then(() => {
+    // Custom protocol: dockterm://new-tab?path=... / dockterm://new-window?path=...
+    try {
+      if (!app.isDefaultProtocolClient('dockterm')) {
+        app.setAsDefaultProtocolClient('dockterm');
+      }
+    } catch (err) {
+      logLine(`protocol register failed: ${err?.message || err}`);
+    }
+
+    wireWindowControls();
+    wireEditFocusTracking();
+    installAppMenu();
+    if (process.platform === 'darwin' && app.dock) {
+      const icon = resolveIcon();
+      if (icon) {
+        try {
+          app.dock.setIcon(icon);
+        } catch {
+          /* ignore */
+        }
       }
     }
-  }
 
-  createWindow().catch((err) => {
-    logLine(`DockTerm failed to start: ${err?.stack || err}`);
-    const { dialog } = require('electron');
-    const logHint = logFilePath
-      ? `\n\nDetails: ${logFilePath}`
-      : '\n\nDetails: ~/Library/Logs/DockTerm/main.log';
-    dialog.showErrorBox(
-      'DockTerm failed to start',
-      String(err?.message || err) + logHint
-    );
-    isQuitting = true;
-    app.quit();
-  });
+    // Queue cold-start opens; apply after the primary window exists
+    // so we don't race-create a second window.
+    {
+      const cold = parseOpenRequestsFromArgv(process.argv || [])
+        .map((r) => ({
+          mode: r.mode === 'window' ? 'window' : 'tab',
+          cwd: normalizeFolderPath(r.cwd),
+        }))
+        .filter((r) => r.cwd);
+      pendingFolderOpens.push(...cold);
+    }
 
-  app.on('activate', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      createWindow().catch((err) => {
-        console.error(err);
-        const { dialog } = require('electron');
+    createWindow({ primary: true })
+      .then((win) => {
+        flushPendingFolderOpens(win);
+      })
+      .catch((err) => {
+        logLine(`DockTerm failed to start: ${err?.stack || err}`);
+        const logHint = logFilePath
+          ? `\n\nDetails: ${logFilePath}`
+          : '\n\nDetails: ~/Library/Logs/DockTerm/main.log';
         dialog.showErrorBox(
           'DockTerm failed to start',
-          String(err?.message || err)
+          String(err?.message || err) + logHint
         );
+        isQuitting = true;
+        app.quit();
       });
-      return;
-    }
-    showMainWindow();
+
+    app.on('activate', () => {
+      const live = anyLiveWindow();
+      if (!live) {
+        createWindow({ primary: true }).catch((err) => {
+          console.error(err);
+          dialog.showErrorBox(
+            'DockTerm failed to start',
+            String(err?.message || err)
+          );
+        });
+        return;
+      }
+      showWindow(live);
+    });
   });
-});
 
-// Keep running in background when the window is hidden.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin' && !isQuitting) {
-    // Window was destroyed somehow — still keep process if we intend background.
-    // Actual quit happens via before-quit / explicit Quit.
-  }
-});
+  // Keep running in background when the window is hidden.
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin' && !isQuitting) {
+      // Window was destroyed somehow — still keep process if we intend background.
+      // Actual quit happens via before-quit / explicit Quit.
+    }
+  });
 
-app.on('before-quit', () => {
-  isQuitting = true;
-  shutdown();
-});
+  app.on('before-quit', () => {
+    isQuitting = true;
+    shutdown();
+  });
+}
