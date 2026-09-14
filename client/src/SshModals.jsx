@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { pickIdentityFile } from './pickIdentityFile.js';
+import { IdentityFileField } from './IdentityFileField.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
 
 export function Modal({ title, onClose, children, wide = false, footer = null }) {
@@ -143,37 +144,14 @@ function HostFormFields({
           inputMode="numeric"
         />
       </label>
-      <div className="host-form-identity">
-        <span>IdentityFile</span>
-        {identityFile ? (
-          <div className="identity-edit-row">
-            <div className="identity-edit-name" title={identityFile}>
-              {identityFile.split(/[/\\]/).pop() || identityFile}
-            </div>
-            <button
-              type="button"
-              className="identity-clear-btn"
-              title="Clear identity file"
-              aria-label="Clear identity file"
-              disabled={saving || picking}
-              onClick={() => setIdentityFile('')}
-            >
-              ×
-            </button>
-          </div>
-        ) : (
-          <div className="identity-file-actions">
-            <button
-              type="button"
-              className="btn ghost identity-browse-btn"
-              disabled={saving || picking}
-              onClick={browseIdentity}
-            >
-              {picking ? 'Browsing…' : 'Browse…'}
-            </button>
-          </div>
-        )}
-      </div>
+      <IdentityFileField
+        label="IdentityFile"
+        value={identityFile}
+        busy={saving || picking}
+        onBrowse={browseIdentity}
+        onChange={setIdentityFile}
+        onClear={() => setIdentityFile('')}
+      />
     </>
   );
 }

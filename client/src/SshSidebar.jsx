@@ -302,7 +302,7 @@ export function SshSidebar({
           )}
           {!loading &&
             filteredSorted.map((host) => {
-              const status = hostStatus(host.alias);
+              const status = hostStatus(host.sshAlias || host.alias);
               return (
               <button
                 key={host.alias}

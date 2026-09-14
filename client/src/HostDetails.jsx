@@ -3,6 +3,7 @@ import { HostFormModal } from './SshModals.jsx';
 import { HostOsBadge } from './HostOsBadge.jsx';
 import { TabContextMenu } from './TabContextMenu.jsx';
 import { pickIdentityFile } from './pickIdentityFile.js';
+import { IdentityFileField } from './IdentityFileField.jsx';
 import { nextCopyAlias } from './useSshHosts.js';
 
 function statusText(status) {
@@ -114,43 +115,17 @@ function IdentityDetailsView({ filePath }) {
   );
 }
 
-/** Edit mode: filename chip + Browse / clear. */
-function IdentityEditRow({ value, busy = false, onBrowse, onRemove }) {
-  const path = displayIdentityPath(value);
-  const name = identityFileName(path);
-
+/** Edit mode: Browse… + drag-drop identity file. */
+function IdentityEditRow({ value, busy = false, onBrowse, onChange, onRemove }) {
   return (
-    <div className="identity-file-block">
-      <div className="detail-label">Identity</div>
-      {path ? (
-        <div className="identity-edit-row">
-          <div className="identity-edit-name" title={path}>
-            {name}
-          </div>
-          <button
-            type="button"
-            className="identity-clear-btn"
-            title="Clear identity file"
-            aria-label="Clear identity file"
-            disabled={busy}
-            onClick={onRemove}
-          >
-            ×
-          </button>
-        </div>
-      ) : (
-        <div className="identity-file-actions">
-          <button
-            type="button"
-            className="btn ghost identity-browse-btn"
-            disabled={busy}
-            onClick={onBrowse}
-          >
-            Browse…
-          </button>
-        </div>
-      )}
-    </div>
+    <IdentityFileField
+      label="Identity"
+      value={value}
+      busy={busy}
+      onBrowse={onBrowse}
+      onChange={onChange}
+      onClear={onRemove}
+    />
   );
 }
 
@@ -261,6 +236,7 @@ function InlineHostEditor({ host, onCancel, onSaved }) {
           value={identityFile}
           busy={saving || picking}
           onBrowse={browseIdentity}
+          onChange={setIdentityFile}
           onRemove={() => setIdentityFile('')}
         />
       </div>

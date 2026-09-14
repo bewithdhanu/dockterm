@@ -112,6 +112,21 @@ export default function App() {
     return connectionKeyFromPane(pane?.ssh);
   }, [tabs, activeId]);
 
+  // Electron: without this, dropping a file onto the window tries to navigate.
+  useEffect(() => {
+    const allow = (e) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('dragover', allow);
+    window.addEventListener('drop', allow);
+    return () => {
+      window.removeEventListener('dragover', allow);
+      window.removeEventListener('drop', allow);
+    };
+  }, []);
+
   // If SSH output already includes a shell prompt but no further chunks arrive
   // (common after MOTD), promote connecting → connected on a short poll.
   useEffect(() => {
@@ -1217,7 +1232,8 @@ export default function App() {
     (host) => {
       hostsApi.markRecent(host.alias);
       setMainView('session');
-      addTab({ title: host.alias, ssh: host.alias });
+      // sshAlias is the OpenSSH Host token (required when display alias has spaces).
+      addTab({ title: host.alias, ssh: host.sshAlias || host.alias });
     },
     [addTab, hostsApi]
   );

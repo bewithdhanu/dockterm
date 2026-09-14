@@ -139,8 +139,8 @@ export function SessionHostsRail({
           {!loading &&
             !error &&
             list.map((host) => {
-              const status = hostStatus(host.alias);
-              const os = hostOsByAlias?.[host.alias];
+              const status = hostStatus(host.sshAlias || host.alias);
+              const os = hostOsByAlias?.[host.sshAlias || host.alias];
               const meta = hostMeta(host);
               return (
                 <div

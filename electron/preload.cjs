@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 function computeEditFocus(target) {
   const el =
@@ -47,6 +47,16 @@ contextBridge.exposeInMainWorld('dockterm', {
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   pickIdentityFile: () => ipcRenderer.invoke('dialog:pickIdentityFile'),
+  /** Absolute path for a File from drag-drop (Electron webUtils). */
+  pathForFile: (file) => {
+    try {
+      if (!file) return null;
+      const p = webUtils.getPathForFile(file);
+      return p || null;
+    } catch {
+      return null;
+    }
+  },
   clipboardWrite: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   clipboardRead: () => ipcRenderer.invoke('clipboard:readText'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

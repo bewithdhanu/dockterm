@@ -4239,7 +4239,54 @@ body.split-dragging-row * {
 
 .identity-file-actions {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
   width: 100%;
+  gap: 8px;
+}
+
+.identity-drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  min-height: 160px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--bg-elevated);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.identity-drop-zone.has-file {
+  border-style: solid;
+}
+
+.identity-drop-zone.is-dragover {
+  border-color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, var(--bg-elevated));
+}
+
+.identity-drop-zone.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.identity-drop-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  text-align: center;
+}
+
+.identity-drop-zone.is-dragover .identity-drop-hint {
+  color: var(--text);
 }
 
 .identity-browse-btn,

@@ -37,16 +37,24 @@
           ),
           #1a1c23;
       }
-      .mark {
-        width: 64px;
-        height: 64px;
-        border-radius: 16px;
-        display: grid;
+      .logo {
+        width: 88px;
+        height: 88px;
+        border-radius: 20px;
+        object-fit: cover;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        background: #11131a;
+      }
+      .logo-fallback {
+        width: 88px;
+        height: 88px;
+        border-radius: 20px;
+        display: none;
         place-items: center;
         background: linear-gradient(145deg, #3b82f6, #1d4ed8);
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
         font-weight: 800;
-        font-size: 22px;
+        font-size: 28px;
         letter-spacing: -0.04em;
       }
       .brand {
@@ -86,12 +94,27 @@
   </head>
   <body>
     <div class="splash">
-      <div class="mark" aria-hidden="true">D</div>
+      <img
+        class="logo"
+        id="logo"
+        src="../build/icon.png"
+        width="88"
+        height="88"
+        alt="DockTerm"
+      />
+      <div class="logo-fallback" id="logo-fallback" aria-hidden="true">D</div>
       <div class="brand">DockTerm</div>
       <div class="status" id="status">Starting…</div>
       <div class="bar" aria-hidden="true"><span></span></div>
     </div>
     <script>
+      const logo = document.getElementById('logo');
+      const fallback = document.getElementById('logo-fallback');
+      logo.addEventListener('error', () => {
+        logo.style.display = 'none';
+        fallback.style.display = 'grid';
+      });
+
       const messages = [
         'Starting…',
         'Starting backend…',

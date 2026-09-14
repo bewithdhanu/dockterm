@@ -8,7 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
-import { listSshHosts, readRawConfig, writeRawConfig, upsertHost, deleteHost, getConfigPath } from './sshConfig.js';
+import { listSshHosts, readRawConfig, writeRawConfig, upsertHost, deleteHost, getConfigPath, resolveSshConnectTarget } from './sshConfig.js';
 import {
   listSnippets,
   createSnippet,
@@ -30,6 +30,10 @@ import {
 import { pickIdentityFileNative } from './pickFile.js';
 import { readIdentityPreview } from './identityPreview.js';
 import { detectHostOs } from './detectHostOs.js';
+import {
+  prepareIdentityForAlias,
+  sshIdentityArgs,
+} from './sshSessionIdentity.js';
 import {
   getProcessCwd,
   escapeShellArg,
@@ -372,9 +376,29 @@ function createPty(cols = 80, rows = 24, { cwd } = {}) {
   throw lastError || new Error('PTY spawn failed for all shells');
 }
 
+function releasePtyExtras(term) {
+  if (!term) return;
+  try {
+    term.__cleanupIdentity?.();
+  } catch {
+    /* ignore */
+  }
+  term.__cleanupIdentity = null;
+}
+
 function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
-  const alias = String(hostAlias || '').trim();
-  if (!alias || /[\s;|&$`<>]/.test(alias)) {
+  const requested = String(hostAlias || '').trim();
+  if (!requested) {
+    throw new Error('Invalid SSH host alias');
+  }
+
+  let alias;
+  try {
+    alias = resolveSshConnectTarget(requested);
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : String(err));
+  }
+  if (/[\s;|&$`<>]/.test(alias)) {
     throw new Error('Invalid SSH host alias');
   }
 
@@ -385,34 +409,63 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
         ? '/usr/bin/ssh'
         : 'ssh';
 
-  // Quiet enough to avoid MOTD-like client chatter, but INFO surfaces
-  // “Connecting to …” so the UI can reflect real progress when available.
-  const term = pty.spawn(
-    sshBin,
-    [
-      '-o',
-      'LogLevel=INFO',
-      '-o',
-      'UpdateHostKeys=no',
-      '-o',
-      'ConnectTimeout=30',
-      '-o',
-      'ConnectionAttempts=1',
-      alias,
-    ],
-    {
+  // Config keeps IdentityFile path; session auth uses key *contents* via a
+  // 0600 temp file so OpenSSH won't fail on world-readable PEMs.
+  let identityCleanup = null;
+  let identityPath = null;
+  try {
+    const prepared = prepareIdentityForAlias(alias);
+    if (prepared) {
+      identityPath = prepared.path;
+      identityCleanup = prepared.cleanup;
+    }
+  } catch (err) {
+    throw new Error(
+      err instanceof Error ? err.message : `Identity prepare failed: ${err}`
+    );
+  }
+
+  const args = [
+    '-o',
+    'LogLevel=INFO',
+    '-o',
+    'UpdateHostKeys=no',
+    '-o',
+    'ConnectTimeout=30',
+    '-o',
+    'ConnectionAttempts=1',
+    ...sshIdentityArgs(identityPath),
+    alias,
+  ];
+
+  let term;
+  try {
+    // Quiet enough to avoid MOTD-like client chatter, but INFO surfaces
+    // “Connecting to …” so the UI can reflect real progress when available.
+    term = pty.spawn(sshBin, args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd: os.homedir(),
       env: ptyEnv(),
+    });
+  } catch (err) {
+    try {
+      identityCleanup?.();
+    } catch {
+      /* ignore */
     }
-  );
+    throw err;
+  }
+
   term.__shellPath = sshBin;
   term.__kind = 'ssh';
   term.__sshHost = alias;
   term.__cwd = remoteCwd || null;
-  console.log(`SSH PTY spawned: ${sshBin} ${alias}`);
+  term.__cleanupIdentity = identityCleanup;
+  console.log(
+    `SSH PTY spawned: ${sshBin} ${alias}${identityPath ? ' (session identity)' : ''}`
+  );
 
   if (remoteCwd && typeof remoteCwd === 'string' && remoteCwd.trim()) {
     const cdCmd = `cd ${escapeShellArg(remoteCwd.trim())}\n`;
@@ -505,6 +558,7 @@ wss.on('connection', (ws) => {
         term.onExit(({ exitCode }) => {
           const meta = sessionMeta.get(id);
           if (meta) meta.alive = false;
+          releasePtyExtras(term);
           send({
             type: 'exit',
             id,

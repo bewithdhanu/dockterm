@@ -194,8 +194,8 @@ export function HostsView({
         {!loading && !error && (
           <div className="hosts-grid">
             {list.map((host) => {
-              const status = hostStatus(host.alias);
-              const os = hostOs(host.alias);
+              const status = hostStatus(host.sshAlias || host.alias);
+              const os = hostOs(host.sshAlias || host.alias);
               const selected =
                 selectedAlias === host.alias || selectedIds.has(host.alias);
               return (

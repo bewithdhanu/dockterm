@@ -1,11 +1,18 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createHash } from 'crypto';
 
 /**
  * SSH config helpers: list hosts, read/write main ~/.ssh/config,
  * add/update/delete individual Host blocks in the main file.
+ *
+ * OpenSSH Host tokens cannot contain spaces. DockTerm allows spaced
+ * display names and stores them as `# DockTerm-Alias: …` while using a
+ * safe internal Host token for `ssh`.
  */
+
+const DOCKTERM_ALIAS_RE = /^#\s*DockTerm-Alias:\s*(.+)$/i;
 
 function expandHome(p) {
   if (!p) return p;
@@ -133,6 +140,18 @@ function readConfigFile(filePath, seen = new Set(), sourceLabel = null) {
 
   for (let i = 0; i < lines.length; i++) {
     let raw = lines[i];
+    const trimmed = raw.trim();
+
+    // Full-line DockTerm display-name comment inside a Host block.
+    if (current && trimmed.startsWith('#')) {
+      const label = trimmed.match(DOCKTERM_ALIAS_RE);
+      if (label) {
+        current.displayAlias = String(label[1] || '').trim() || null;
+        current.endLine = i;
+      }
+      continue;
+    }
+
     const hash = raw.indexOf('#');
     const code = (hash >= 0 ? raw.slice(0, hash) : raw).trim();
     if (!code) continue;
@@ -160,6 +179,7 @@ function readConfigFile(filePath, seen = new Set(), sourceLabel = null) {
       current = {
         hosts,
         values: {},
+        displayAlias: null,
         sourceFile: resolved,
         isMain,
         startLine: i,
@@ -215,16 +235,48 @@ function expandInclude(globPath, seen) {
   return out;
 }
 
-function validateAlias(alias) {
-  const a = String(alias || '').trim();
+/**
+ * True if `s` is a single OpenSSH Host token (no spaces / wildcards).
+ */
+export function isValidSshHostToken(s) {
+  const a = String(s || '').trim();
+  if (!a || /[\s*?]/.test(a)) return false;
+  return /^[A-Za-z0-9._@:+=-]+$/.test(a);
+}
+
+/**
+ * User-facing host name. Spaces allowed; OpenSSH Host line may differ.
+ */
+export function validateAlias(alias) {
+  const a = String(alias || '').trim().replace(/\s+/g, ' ');
   if (!a) throw new Error('Host alias is required');
-  if (/[\s*]/.test(a) || a.includes('?')) {
-    throw new Error('Host alias cannot contain spaces or wildcards');
+  if (/[*?]/.test(a)) {
+    throw new Error('Host alias cannot contain wildcards (* or ?)');
   }
-  if (!/^[A-Za-z0-9._@:+=-]+$/.test(a)) {
+  if (/[\r\n#]/.test(a)) {
     throw new Error('Host alias has invalid characters');
   }
   return a;
+}
+
+function makeInternalSshAlias(displayAlias) {
+  const digest = createHash('sha256')
+    .update(String(displayAlias).trim().toLowerCase())
+    .digest('hex')
+    .slice(0, 12);
+  return `dt-${digest}`;
+}
+
+/**
+ * Pick OpenSSH Host token for a display name.
+ * @param {string} displayAlias
+ * @param {string | null} [keepSshAlias] preserve on edit when still needed
+ */
+export function sshAliasForDisplay(displayAlias, keepSshAlias = null) {
+  const display = validateAlias(displayAlias);
+  if (isValidSshHostToken(display)) return display;
+  if (keepSshAlias && isValidSshHostToken(keepSshAlias)) return keepSshAlias;
+  return makeInternalSshAlias(display);
 }
 
 function sanitizeField(value, label) {
@@ -237,8 +289,18 @@ function sanitizeField(value, label) {
   return v;
 }
 
-function formatHostBlock({ alias, hostName, user, port, identityFile }) {
-  const lines = [`Host ${alias}`];
+function formatHostBlock({
+  sshAlias,
+  displayAlias,
+  hostName,
+  user,
+  port,
+  identityFile,
+}) {
+  const lines = [`Host ${sshAlias}`];
+  if (displayAlias && displayAlias !== sshAlias) {
+    lines.push(`  # DockTerm-Alias: ${displayAlias}`);
+  }
   if (hostName) lines.push(`  HostName ${hostName}`);
   if (user) lines.push(`  User ${user}`);
   if (port) lines.push(`  Port ${port}`);
@@ -251,6 +313,7 @@ function formatHostBlock({ alias, hostName, user, port, identityFile }) {
 /**
  * @returns {Array<{
  *  alias: string,
+ *  sshAlias: string,
  *  hostName: string,
  *  user: string | null,
  *  port: string | null,
@@ -270,11 +333,14 @@ export function listSshHosts() {
     const concrete = block.hosts.filter((h) => !isWildcardHost(h));
     if (concrete.length === 0) continue;
 
-    for (const alias of concrete) {
-      if (hosts.has(alias)) continue;
-      hosts.set(alias, {
-        alias,
-        hostName: block.values.hostname || alias,
+    for (const sshAlias of concrete) {
+      if (hosts.has(sshAlias)) continue;
+      const display =
+        (block.singleAlias && block.displayAlias) || sshAlias;
+      hosts.set(sshAlias, {
+        alias: display,
+        sshAlias,
+        hostName: block.values.hostname || sshAlias,
         user: block.values.user || null,
         port: block.values.port || null,
         identityFile: block.values.identityfile
@@ -291,8 +357,30 @@ export function listSshHosts() {
   );
 }
 
-function findEditableHostRange(lines, alias) {
-  const target = alias.toLowerCase();
+/** @param {string} name display alias or ssh Host token */
+export function findSshHost(name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want) return null;
+  return (
+    listSshHosts().find(
+      (h) =>
+        h.alias.toLowerCase() === want || h.sshAlias.toLowerCase() === want
+    ) || null
+  );
+}
+
+/** OpenSSH connect target for a display name or Host token. */
+export function resolveSshConnectTarget(name) {
+  const raw = String(name || '').trim();
+  if (!raw) throw new Error('SSH host is required');
+  const found = findSshHost(raw);
+  if (found) return found.sshAlias;
+  if (isValidSshHostToken(raw)) return raw;
+  throw new Error(`Unknown SSH host "${raw}"`);
+}
+
+function findEditableHostRange(lines, sshAlias) {
+  const target = String(sshAlias || '').toLowerCase();
   for (let i = 0; i < lines.length; i++) {
     const code = lines[i].replace(/#.*$/, '').trim();
     const m = code.match(/^Host\s+(.+)$/i);
@@ -306,7 +394,6 @@ function findEditableHostRange(lines, alias) {
       if (/^(Host|Match)\b/i.test(next)) break;
       end = j;
     }
-    // Trim trailing blank lines from block end for cleaner replace
     while (end > i && lines[end].trim() === '') end -= 1;
     return { start: i, end };
   }
@@ -314,7 +401,7 @@ function findEditableHostRange(lines, alias) {
 }
 
 export function upsertHost(input, { originalAlias } = {}) {
-  const alias = validateAlias(input.alias);
+  const displayAlias = validateAlias(input.alias);
   const hostName = sanitizeField(input.hostName, 'HostName');
   const user = sanitizeField(input.user, 'User');
   const port = sanitizeField(input.port, 'Port');
@@ -324,41 +411,64 @@ export function upsertHost(input, { originalAlias } = {}) {
     throw new Error('Port must be a number');
   }
 
-  const renameFrom = originalAlias ? validateAlias(originalAlias) : null;
   const existing = listSshHosts();
-  const conflict = existing.find(
-    (h) => h.alias.toLowerCase() === alias.toLowerCase()
-  );
-  if (conflict && (!renameFrom || conflict.alias.toLowerCase() !== renameFrom.toLowerCase())) {
-    throw new Error(`Host "${alias}" already exists`);
+  const renameFrom = originalAlias
+    ? validateAlias(originalAlias)
+    : null;
+  const old = renameFrom ? findSshHost(renameFrom) : null;
+
+  if (renameFrom && !old) {
+    throw new Error(`Host "${renameFrom}" not found`);
+  }
+  if (old && !old.editable) {
+    throw new Error(
+      `Host "${renameFrom}" is not editable here (multi-host entry or included file)`
+    );
   }
 
-  if (renameFrom) {
-    const old = existing.find(
-      (h) => h.alias.toLowerCase() === renameFrom.toLowerCase()
-    );
-    if (!old) throw new Error(`Host "${renameFrom}" not found`);
-    if (!old.editable) {
-      throw new Error(
-        `Host "${renameFrom}" is not editable here (multi-host entry or included file)`
-      );
-    }
+  const conflict = existing.find(
+    (h) => h.alias.toLowerCase() === displayAlias.toLowerCase()
+  );
+  if (
+    conflict &&
+    (!old || conflict.sshAlias.toLowerCase() !== old.sshAlias.toLowerCase())
+  ) {
+    throw new Error(`Host "${displayAlias}" already exists`);
+  }
+
+  // Keep internal Host token stable across renames when display needs one;
+  // if the new display is itself a valid Host token, use it (and rename Host).
+  let sshAlias = sshAliasForDisplay(displayAlias, old?.sshAlias || null);
+  if (old && !isValidSshHostToken(displayAlias)) {
+    sshAlias = old.sshAlias;
+  }
+
+  // Avoid Host-token clash with a different entry.
+  const tokenClash = existing.find(
+    (h) => h.sshAlias.toLowerCase() === sshAlias.toLowerCase()
+  );
+  if (
+    tokenClash &&
+    (!old || tokenClash.sshAlias.toLowerCase() !== old.sshAlias.toLowerCase())
+  ) {
+    // Extremely unlikely hash collision — bump with extra entropy.
+    sshAlias = makeInternalSshAlias(`${displayAlias}\0${Date.now()}`);
   }
 
   ensureSshDir();
   const raw = readRawConfig();
   const lines = raw === '' ? [] : raw.split(/\n/);
-  // If file ends with \n, last element is ''; keep structure
   const block = formatHostBlock({
-    alias,
+    sshAlias,
+    displayAlias,
     hostName,
     user,
     port,
     identityFile,
   }).replace(/\n$/, '');
 
-  if (renameFrom) {
-    const range = findEditableHostRange(lines, renameFrom);
+  if (old) {
+    const range = findEditableHostRange(lines, old.sshAlias);
     if (!range) {
       throw new Error(`Could not find editable Host block for "${renameFrom}"`);
     }
@@ -374,14 +484,14 @@ export function upsertHost(input, { originalAlias } = {}) {
     writeRawConfig(next);
   }
 
-  return listSshHosts().find((h) => h.alias === alias);
+  return listSshHosts().find(
+    (h) => h.sshAlias.toLowerCase() === sshAlias.toLowerCase()
+  );
 }
 
 export function deleteHost(alias) {
   const a = validateAlias(alias);
-  const existing = listSshHosts().find(
-    (h) => h.alias.toLowerCase() === a.toLowerCase()
-  );
+  const existing = findSshHost(a);
   if (!existing) throw new Error(`Host "${a}" not found`);
   if (!existing.editable) {
     throw new Error(
@@ -391,16 +501,15 @@ export function deleteHost(alias) {
 
   const raw = readRawConfig();
   const lines = raw.split(/\n/);
-  const range = findEditableHostRange(lines, a);
+  const range = findEditableHostRange(lines, existing.sshAlias);
   if (!range) throw new Error(`Could not find Host block for "${a}"`);
 
   let start = range.start;
   let end = range.end;
-  // Also remove one surrounding blank line to avoid huge gaps
   if (end + 1 < lines.length && lines[end + 1].trim() === '') end += 1;
   if (start > 0 && lines[start - 1].trim() === '') start -= 1;
 
   const next = [...lines.slice(0, start), ...lines.slice(end + 1)];
   writeRawConfig(next.join('\n').replace(/\n*$/, '\n'));
-  return { deleted: a };
+  return { deleted: existing.alias, sshAlias: existing.sshAlias };
 }

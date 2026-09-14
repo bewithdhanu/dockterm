@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { resolveSshConnectTarget } from './sshConfig.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -161,8 +162,7 @@ function parseDetectOutput(stdout) {
  * Does not touch the interactive PTY session.
  */
 export async function detectHostOs(alias) {
-  const host = String(alias || '').trim();
-  if (!host) throw new Error('Host alias required');
+  const host = resolveSshConnectTarget(alias);
   if (/[\r\n]/.test(host)) throw new Error('Invalid host alias');
 
   const { stdout, stderr } = await execFileAsync(
