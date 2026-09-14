@@ -27,6 +27,19 @@ import {
   killPortCommandForPty,
   platformInfo,
 } from './sessionStats.js';
+import {
+  fmList,
+  fmMkdir,
+  fmCreateFile,
+  fmRename,
+  fmDelete,
+  fmChmod,
+  fmPaste,
+  fmArchive,
+  fmExtract,
+  fmDownload,
+  fmUpload,
+} from './fileManager.js';
 import { pickIdentityFileNative } from './pickFile.js';
 import { readIdentityPreview } from './identityPreview.js';
 import { detectHostOs } from './detectHostOs.js';
@@ -53,7 +66,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '48mb' }));
 
 app.get('/api/ssh-hosts', (_req, res) => {
   try {
@@ -151,6 +164,31 @@ app.get('/api/identity-preview', (req, res) => {
     res.status(400).json({ error: message });
   }
 });
+
+function fmHandler(fn) {
+  return async (req, res) => {
+    try {
+      const body = { ...(req.body || {}) };
+      const result = await fn(body);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ ok: false, error: message });
+    }
+  };
+}
+
+app.post('/api/fm/list', fmHandler(fmList));
+app.post('/api/fm/mkdir', fmHandler(fmMkdir));
+app.post('/api/fm/create-file', fmHandler(fmCreateFile));
+app.post('/api/fm/rename', fmHandler(fmRename));
+app.post('/api/fm/delete', fmHandler(fmDelete));
+app.post('/api/fm/chmod', fmHandler(fmChmod));
+app.post('/api/fm/paste', fmHandler(fmPaste));
+app.post('/api/fm/archive', fmHandler(fmArchive));
+app.post('/api/fm/extract', fmHandler(fmExtract));
+app.post('/api/fm/download', fmHandler(fmDownload));
+app.post('/api/fm/upload', fmHandler(fmUpload));
 
 app.get('/api/ssh-hosts/:alias/os', async (req, res) => {
   try {

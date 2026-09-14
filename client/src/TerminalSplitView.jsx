@@ -159,6 +159,7 @@ export function TerminalSplitView({
             alive={pane.alive !== false}
             sshStatus={pane.sshStatus || null}
             sshHost={pane.ssh || null}
+            cwd={pane.cwd || null}
           />
         </div>
       </div>

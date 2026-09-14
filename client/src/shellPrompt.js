@@ -63,6 +63,57 @@ function lineLooksLikePrompt(line) {
 }
 
 /**
+ * Pull cwd from a prompt line like `user@host:~/proj$` or `/var/log#`.
+ * @param {string} line
+ * @returns {string | null}
+ */
+export function cwdFromPromptLine(line) {
+  const last = String(line || '').trimEnd();
+  if (!lineLooksLikePrompt(last)) return null;
+
+  let m = last.match(/^[^:\n]*@[^:\n]+:(.+?)[#$]\s*$/);
+  if (m) return m[1].trim() || null;
+
+  m = last.match(/^([~\/][^#$]*?)[#$]\s*$/);
+  if (m) return m[1].trim() || null;
+
+  return null;
+}
+
+/**
+ * Scan the end of a shell buffer for a prompt that includes a path.
+ * @param {string} buf
+ * @returns {string | null}
+ */
+export function cwdFromShellBuffer(buf) {
+  const plain = normalizeForPrompt(buf).replace(/\n+$/, '');
+  if (!plain) return null;
+  const lines = plain.split('\n');
+  let checked = 0;
+  for (let i = lines.length - 1; i >= 0 && checked < 8; i -= 1) {
+    if (!String(lines[i] || '').trim()) continue;
+    checked += 1;
+    const cwd = cwdFromPromptLine(lines[i]);
+    if (cwd) return cwd;
+  }
+  return null;
+}
+
+/**
+ * Window titles are often `user@host:path` (bash/zsh default).
+ * @param {string} title
+ * @returns {string | null}
+ */
+export function cwdFromTerminalTitle(title) {
+  const s = String(title || '').trim();
+  if (!s) return null;
+  const m = s.match(/:([~\/].*)$/);
+  if (m) return m[1].trim() || null;
+  if (s.startsWith('/') || s.startsWith('~')) return s;
+  return null;
+}
+
+/**
  * True when buffer ends on a typical shell prompt (post-MOTD / login).
  * @param {string} buf
  */

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LuSearch, LuX } from 'react-icons/lu';
+import { FileManagerPanel } from './FileManagerPanel.jsx';
 
 const TOP_PROCS = 25;
 
@@ -55,10 +56,12 @@ export function TerminalFooter({
   alive = true,
   sshStatus = null,
   sshHost = null,
+  cwd = null,
 }) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [pkillOpen, setPkillOpen] = useState(false);
   const [procsOpen, setProcsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [stats, setStats] = useState(null);
   const [procs, setProcs] = useState([]);
   const [ports, setPorts] = useState([]);
@@ -129,6 +132,7 @@ export function TerminalFooter({
     setStatsOpen(false);
     setPkillOpen(false);
     setProcsOpen(false);
+    setFilesOpen(false);
   }, [toolsReady]);
 
   const statusLabel = !connected
@@ -151,7 +155,9 @@ export function TerminalFooter({
         : 'ok';
   const inRate = stats?.inRate ?? 0;
   const outRate = stats?.outRate ?? 0;
-  const panelOpen = toolsReady && (statsOpen || pkillOpen || procsOpen);
+  const panelOpen =
+    toolsReady && (statsOpen || pkillOpen || procsOpen || filesOpen);
+  const effectiveCwd = cwd || stats?.cwd || null;
 
   const sortedProcs = useMemo(() => {
     const q = procQuery.trim().toLowerCase();
@@ -266,10 +272,30 @@ export function TerminalFooter({
     setStatsOpen(which === 'stats' ? (v) => !v : false);
     setPkillOpen(which === 'pkill' ? (v) => !v : false);
     setProcsOpen(which === 'procs' ? (v) => !v : false);
+    if (which === 'files') {
+      setFilesOpen((v) => {
+        const next = !v;
+        // No OSC 7 yet — ask the live shell for $PWD (leading space ≈ histignore).
+        if (next && !(cwd || stats?.cwd)) {
+          sendRef.current({
+            type: 'input',
+            id,
+            data: " printf '\\033]7;file://localhost%s\\033\\\\' \"$PWD\"\n",
+          });
+        }
+        return next;
+      });
+    } else {
+      setFilesOpen(false);
+    }
   };
 
   return (
-    <div className={`term-footer ${panelOpen ? 'open' : ''}`}>
+    <div
+      className={`term-footer ${panelOpen ? 'open' : ''} ${
+        filesOpen ? 'files-open' : ''
+      }`}
+    >
       <div className="term-footer-bar">
         <div className="term-footer-left">
           <span
@@ -288,6 +314,14 @@ export function TerminalFooter({
         <div className="term-footer-right">
           {toolsReady && (
             <>
+              <button
+                type="button"
+                className={`term-footer-stats-btn ${filesOpen ? 'active' : ''}`}
+                onClick={() => openPanel('files')}
+                title="File manager for current folder"
+              >
+                Files
+              </button>
               <button
                 type="button"
                 className={`term-footer-stats-btn ${procsOpen ? 'active' : ''}`}
@@ -316,6 +350,15 @@ export function TerminalFooter({
           )}
         </div>
       </div>
+
+      {filesOpen && (
+        <div className="term-footer-panel term-files-footer-panel">
+          <FileManagerPanel
+            sshHost={sshHost}
+            cwd={effectiveCwd}
+          />
+        </div>
+      )}
 
       {statsOpen && (
         <div className="term-footer-panel">

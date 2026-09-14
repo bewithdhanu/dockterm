@@ -105,7 +105,7 @@ open "dockterm://new-tab?path=/path/to/folder"
 open "dockterm://new-window?path=/path/to/folder"
 ```
 
-**Looking for sponsors:** help cover the Apple Developer Program ($99/year) so future macOS releases can be notarized and open with a double-click. [Get in touch →](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest)
+**macOS signing:** release CI can Developer ID–sign and notarize when Apple secrets are set — see [docs/macos-signing.md](./docs/macos-signing.md). Support the project on [Ko-fi](https://ko-fi.com/bewithdhanu).
 
 ## Quick start (development)
 
@@ -177,7 +177,7 @@ Issues and PRs are welcome. For packaging changes, test with `npm run dist:dir` 
 
 ## Sponsors
 
-DockTerm is free and MIT-licensed. We're looking for sponsors (individuals or companies) to fund **Apple notarization** so Mac users get Gatekeeper-clean downloads. If that sounds useful to you or your team, [open a sponsorship issue](https://github.com/bewithdhanu/dockterm/issues/new?title=Sponsorship%20interest).
+DockTerm is free and MIT-licensed. Support development on [Ko-fi](https://ko-fi.com/bewithdhanu). For Gatekeeper-clean Mac builds, configure Developer ID signing per [docs/macos-signing.md](./docs/macos-signing.md).
 
 ## License
 

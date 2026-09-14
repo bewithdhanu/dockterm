@@ -1368,6 +1368,16 @@ body,
   filter: brightness(0.92);
 }
 
+.btn.danger {
+  background: color-mix(in srgb, #ef4444 85%, var(--bg));
+  border-color: #ef4444;
+  color: #fff;
+}
+
+.btn.danger:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
 .btn.primary:disabled {
   color: #fff;
 }
@@ -2300,6 +2310,361 @@ body,
   border-top: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
+}
+
+.term-footer.files-open .term-files-footer-panel {
+  padding: 0;
+  height: 50vh;
+  min-height: 280px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.term-files-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.term-files-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.term-files-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+
+.term-files-actions-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.term-files-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.term-files-icon-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.term-files-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.term-files-icon-btn[data-tooltip]:hover:not(:disabled)::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel-2, var(--panel));
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 14px color-mix(in srgb, #000 28%, transparent);
+}
+
+.term-files-icon-btn[data-tooltip]:hover:not(:disabled)::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  z-index: 40;
+  border: 4px solid transparent;
+  border-bottom-color: var(--border);
+  pointer-events: none;
+}
+
+.term-files-upload-input {
+  display: none;
+}
+
+.term-files-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.term-files-dialog-field input {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+
+.term-files-dialog-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.term-files-error {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #f87171;
+  background: color-mix(in srgb, #f87171 12%, var(--bg));
+  border-bottom: 1px solid var(--border);
+}
+
+.term-files-readonly-hint {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #fbbf24;
+  background: color-mix(in srgb, #fbbf24 14%, transparent);
+  border: 1px solid color-mix(in srgb, #fbbf24 35%, transparent);
+  user-select: none;
+  cursor: default;
+}
+
+.term-files-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Theme cubone file manager to DockTerm light/dark tokens */
+.dockterm-fm {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Cubone ships light-only chrome; hide its toolbar (we have ours) and force dark */
+.dockterm-fm .toolbar {
+  display: none !important;
+}
+
+.dockterm-fm .file-explorer {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--bg) !important;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.dockterm-fm .navigation-pane,
+.dockterm-fm .empty-nav-pane,
+.dockterm-fm .sidebar-resize,
+.dockterm-fm .nav-toggler {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+.dockterm-fm .files-container {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  width: 100% !important;
+  grid-template-columns: 1fr !important;
+  background: var(--bg) !important;
+  background-color: var(--bg) !important;
+}
+
+/* Nav is CSS-hidden but cubone still shrinks the list to col2% — force full width */
+.dockterm-fm .folders-preview {
+  width: 100% !important;
+  max-width: 100% !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+}
+
+.dockterm-fm .folders-preview,
+.dockterm-fm .files,
+.dockterm-fm .files.list,
+.dockterm-fm .files-header,
+.dockterm-fm .file-item-container,
+.dockterm-fm .bread-crumb-container,
+.dockterm-fm .breadcrumb,
+.dockterm-fm .fm-toolbar,
+.dockterm-fm .file-actions,
+.dockterm-fm .empty-folder,
+.dockterm-fm .item-action,
+.dockterm-fm .toggle-view,
+.dockterm-fm table,
+.dockterm-fm thead,
+.dockterm-fm tbody,
+.dockterm-fm tr,
+.dockterm-fm th,
+.dockterm-fm td {
+  background: var(--bg) !important;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.dockterm-fm .files {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  overflow: auto !important;
+}
+
+.dockterm-fm .files.list .files-header,
+.dockterm-fm .files.list .file-item-container,
+.dockterm-fm .files.list .file-item {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.dockterm-fm .files.list .file-item .file-name {
+  max-width: none !important;
+  flex: 1 1 auto !important;
+}
+
+.dockterm-fm .files.list .files-header {
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+}
+
+.dockterm-fm .files-header,
+.dockterm-fm .bread-crumb-container,
+.dockterm-fm .breadcrumb {
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+}
+
+.dockterm-fm .breadcrumb .folder-name-btn:hover,
+.dockterm-fm .breadcrumb .folder-name-btn:focus {
+  background: var(--accent-soft) !important;
+  background-color: var(--accent-soft) !important;
+}
+
+.dockterm-fm .file-item:hover,
+.dockterm-fm .active-list-item,
+.dockterm-fm .file-selected,
+.dockterm-fm .file-selcted,
+.dockterm-fm .files.list .file-item-container:hover {
+  background: var(--accent-soft) !important;
+  background-color: var(--accent-soft) !important;
+}
+
+.dockterm-fm .file-name,
+.dockterm-fm .file-date,
+.dockterm-fm .file-size,
+.dockterm-fm .empty-folder,
+.dockterm-fm .modified-date {
+  color: var(--text) !important;
+}
+
+.dockterm-fm .fm-context-menu,
+.dockterm-fm .fm-modal,
+.dockterm-fm .dialog,
+.dockterm-fm .fm-context-menu .sub-menu {
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.dockterm-fm .fm-button,
+.dockterm-fm .fm-button-secondary {
+  background: var(--bg-elevated) !important;
+  background-color: var(--bg-elevated) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.dockterm-fm .fm-button-primary {
+  background: var(--accent) !important;
+  background-color: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
+
+.dockterm-fm .files::-webkit-scrollbar-track,
+.dockterm-fm .breadcrumb::-webkit-scrollbar-track {
+  background: var(--bg) !important;
+}
+
+.term-files-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--muted);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+
+.term-files-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: term-files-spin 0.7s linear infinite;
+}
+
+@keyframes term-files-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .term-stats-grid {

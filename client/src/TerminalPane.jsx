@@ -17,6 +17,10 @@ import {
 } from './terminalThemes.js';
 import { APP_THEME_EVENT } from './appTheme.js';
 import { appendCommandHistory } from './commandHistory.js';
+import {
+  cwdFromShellBuffer,
+  cwdFromTerminalTitle,
+} from './shellPrompt.js';
 
 function stripAnsi(text) {
   return String(text || '')
@@ -475,6 +479,7 @@ export function TerminalPane({
   const sshStatusRef = useRef(sshStatus);
   const sshHostRef = useRef(sshHost);
   const cwdRef = useRef(null);
+  const outTailRef = useRef('');
   const typedLineRef = useRef('');
   const connectLogRef = useRef('');
   const divertRef = useRef(Boolean(isSsh && sshStatus === 'connecting'));
@@ -561,6 +566,14 @@ export function TerminalPane({
       connectLogRef.current = '';
       setOverlay(null);
       setHostKeyAnswered(false);
+
+      const fromPrompt = cwdFromShellBuffer(prompt || raw);
+      if (fromPrompt) {
+        cwdRef.current = fromPrompt;
+        onCwdRef.current?.(fromPrompt);
+        sendRef.current({ type: 'cwd', id, cwd: fromPrompt });
+      }
+      if (prompt) outTailRef.current = prompt;
 
       if (!term) return;
       try {
@@ -751,8 +764,18 @@ export function TerminalPane({
       }
     });
 
+    const reportCwd = (next) => {
+      const cwd = String(next || '').trim();
+      if (!cwd || cwd === cwdRef.current) return;
+      cwdRef.current = cwd;
+      onCwdRef.current?.(cwd);
+      sendRef.current({ type: 'cwd', id, cwd });
+    };
+
     const titleDisp = term.onTitleChange((title) => {
       onTitleRef.current?.(title);
+      const fromTitle = cwdFromTerminalTitle(title);
+      if (fromTitle) reportCwd(fromTitle);
     });
 
     try {
@@ -763,11 +786,7 @@ export function TerminalPane({
           if (url.protocol === 'file:') {
             let cwd = decodeURIComponent(url.pathname || '');
             if (/^\/[A-Za-z]:\//.test(cwd)) cwd = cwd.slice(1);
-            if (cwd) {
-              cwdRef.current = cwd;
-              onCwdRef.current?.(cwd);
-              sendRef.current({ type: 'cwd', id, cwd });
-            }
+            if (cwd) reportCwd(cwd);
           }
         } catch {
           /* ignore */
@@ -799,6 +818,9 @@ export function TerminalPane({
         return;
       }
       term.write(data);
+      outTailRef.current = (outTailRef.current + data).slice(-6000);
+      const fromPrompt = cwdFromShellBuffer(outTailRef.current);
+      if (fromPrompt) reportCwd(fromPrompt);
     };
 
     const unregister = registerHandlers(id, {

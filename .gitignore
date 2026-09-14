@@ -9,6 +9,11 @@ client/dist/
 *.log
 .env
 .env.*
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+Certificates.p12.txt
 build/*
 !build/icon.png
 !build/icon.icns
