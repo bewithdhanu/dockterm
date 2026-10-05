@@ -6,7 +6,7 @@ const { spawn, execFileSync } = require('child_process');
 const {
   parseOpenRequestsFromArgv,
   parseOpenRequestFromUrl,
-  installFinderServices,
+  installFolderOpenIntegration,
 } = require('./folderOpen.cjs');
 
 /** @type {import('electron').BrowserWindow | null} */
@@ -18,8 +18,18 @@ let serverProc = null;
 let serverPort = null;
 let isQuitting = false;
 
+/** Opens that arrived before any BrowserWindow existed. */
 /** @type {{ mode: 'tab' | 'window', cwd: string }[]} */
-let pendingFolderOpens = [];
+let startupOpens = [];
+/** Per-window queue until that renderer calls takeFolderOpens(). */
+/** @type {WeakMap<import('electron').WebContents, { mode: 'tab' | 'window', cwd: string }[]>} */
+const opensForContents = new WeakMap();
+/** Renderers that already pulled their queue. */
+/** @type {WeakSet<import('electron').WebContents>} */
+const rendererListening = new WeakSet();
+let applyOpenChain = Promise.resolve();
+let lastOpenKey = '';
+let lastOpenAt = 0;
 
 const PREFERRED_PORT = 39281;
 const SERVER_BOOT_MS = 45000;
@@ -384,87 +394,159 @@ function normalizeFolderPath(cwd) {
   }
 }
 
-function sendOpenFolderToWindow(win, request) {
-  if (!win || win.isDestroyed()) return false;
-  const cwd = normalizeFolderPath(request.cwd);
-  if (!cwd) return false;
-  const payload = { mode: request.mode || 'tab', cwd };
-  const send = () => {
+function appUiIsUp() {
+  for (const w of windows) {
+    if (w && !w.isDestroyed() && rendererListening.has(w.webContents)) return true;
+  }
+  return false;
+}
+
+function deliverToWindow(win, item) {
+  if (!win || win.isDestroyed()) return;
+  const wc = win.webContents;
+  showWindow(win);
+  if (rendererListening.has(wc)) {
     try {
-      win.webContents.send('dockterm:open-folder', payload);
+      wc.send('dockterm:open-folder', item);
     } catch (err) {
       logLine(`open-folder send failed: ${err?.message || err}`);
     }
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(send, 250);
+    return;
+  }
+  const list = opensForContents.get(wc) || [];
+  list.push(item);
+  opensForContents.set(wc, list);
+}
+
+function takeOpensForContents(wc) {
+  rendererListening.add(wc);
+  const list = opensForContents.get(wc) || [];
+  opensForContents.delete(wc);
+  return list;
+}
+
+function argvOpenRequests(argv) {
+  return parseOpenRequestsFromArgv(argv || [], {
+    allowPositional: app.isPackaged && process.platform === 'win32',
+  });
+}
+
+function acceptOpen(raw) {
+  const cwd = normalizeFolderPath(raw?.cwd);
+  if (!cwd) return null;
+  const mode = raw.mode === 'window' ? 'window' : 'tab';
+  const key = `${mode}:${cwd}`;
+  const now = Date.now();
+  if (key === lastOpenKey && now - lastOpenAt < 800) return null;
+  lastOpenKey = key;
+  lastOpenAt = now;
+  return { mode, cwd };
+}
+
+/**
+ * tab  → existing window (or the first window on cold start)
+ * window → a new BrowserWindow once the app UI is already up
+ */
+function applyOpen(raw) {
+  applyOpenChain = applyOpenChain
+    .then(() => applyOpenNow(raw))
+    .catch((err) => logLine(`applyOpen failed: ${err?.message || err}`));
+  return applyOpenChain;
+}
+
+async function applyOpenNow(raw) {
+  const item = acceptOpen(raw);
+  if (!item) return;
+  logLine(`folder-open mode=${item.mode} cwd=${item.cwd}`);
+
+  if (item.mode === 'window' && appUiIsUp()) {
+    const win = await createWindow({
+      primary: false,
+      skipSplash: Boolean(serverPort),
     });
-  } else {
-    setTimeout(send, 80);
+    deliverToWindow(win, item);
+    return;
   }
-  showWindow(win);
-  return true;
+
+  const win = BrowserWindow.getFocusedWindow() || anyLiveWindow();
+  if (!win) {
+    startupOpens.push(item);
+    return;
+  }
+  deliverToWindow(win, item);
 }
 
-async function enqueueFolderOpens(requests) {
-  const list = (requests || [])
-    .map((r) => ({
-      mode: r.mode === 'window' ? 'window' : 'tab',
-      cwd: normalizeFolderPath(r.cwd),
-    }))
-    .filter((r) => r.cwd);
-  if (!list.length) return;
-
-  for (const req of list) {
-    if (req.mode === 'window') {
-      try {
-        const win = await createWindow({
-          primary: !anyLiveWindow(),
-        });
-        sendOpenFolderToWindow(win, req);
-      } catch (err) {
-        logLine(`new-window open failed: ${err?.message || err}`);
-        pendingFolderOpens.push(req);
-      }
-      continue;
-    }
-
-    let win = anyLiveWindow();
-    if (!win) {
-      pendingFolderOpens.push(req);
-      try {
-        win = await createWindow({ primary: true });
-      } catch (err) {
-        logLine(`create window for tab open failed: ${err?.message || err}`);
-        continue;
-      }
-    }
-    sendOpenFolderToWindow(win, req);
+function applyStartupOpens(win) {
+  const pending = startupOpens.slice();
+  startupOpens = [];
+  if (!pending.length || !win) return;
+  deliverToWindow(win, pending[0]);
+  for (let i = 1; i < pending.length; i += 1) {
+    applyOpen(pending[i]);
   }
 }
 
-function flushPendingFolderOpens(win) {
-  if (!pendingFolderOpens.length || !win || win.isDestroyed()) return;
-  const queued = pendingFolderOpens.slice();
-  pendingFolderOpens = [];
-  // Cold start: first request (tab or window) lands in the primary window.
-  // Extra --new-window requests still spawn additional windows.
-  let assignedPrimary = false;
-  for (const req of queued) {
-    if (req.mode === 'window' && assignedPrimary) {
-      void enqueueFolderOpens([req]);
-      continue;
+function applyArgv(argv) {
+  for (const req of argvOpenRequests(argv)) applyOpen(req);
+}
+
+function windowsLaunchOpts() {
+  if (app.isPackaged) {
+    return { exePath: process.execPath, extraArgs: [] };
+  }
+  return {
+    exePath: process.execPath,
+    extraArgs: [path.resolve(process.argv[1] || '.')],
+  };
+}
+
+function registerDocktermProtocol() {
+  try {
+    if (process.defaultApp) {
+      const entry = path.resolve(process.argv[1] || '.');
+      app.setAsDefaultProtocolClient('dockterm', process.execPath, [entry]);
+    } else {
+      app.setAsDefaultProtocolClient('dockterm');
     }
-    sendOpenFolderToWindow(win, req);
-    assignedPrimary = true;
+  } catch (err) {
+    logLine(`protocol register failed: ${err?.message || err}`);
   }
 }
 
-function handleArgvOpens(argv) {
-  const reqs = parseOpenRequestsFromArgv(argv || []);
-  if (!reqs.length) return;
-  void enqueueFolderOpens(reqs);
+function installFolderMenus() {
+  return installFolderOpenIntegration(app.getPath('exe'), windowsLaunchOpts());
+}
+
+function isAppContentUrl(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return (
+      (u.hostname === '127.0.0.1' || u.hostname === 'localhost') &&
+      (u.protocol === 'http:' || u.protocol === 'https:')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isSplashUrl(url) {
+  return /splash\.html(?:[?#]|$)/i.test(String(url || ''));
+}
+
+function wireNavigationGuard(win) {
+  // Windows mouse back/forward (X1/X2) are App Commands, not page clicks.
+  win.on('app-command', (event, cmd) => {
+    if (cmd === 'browser-backward' || cmd === 'browser-forward') {
+      event.preventDefault();
+    }
+  });
+
+  win.webContents.on('will-navigate', (event, url) => {
+    const current = win.webContents.getURL() || '';
+    if (isAppContentUrl(url)) return;
+    if (isSplashUrl(url) && !isAppContentUrl(current)) return;
+    event.preventDefault();
+  });
 }
 
 function wireWindowControls() {
@@ -474,6 +556,7 @@ function wireWindowControls() {
   ipcMain.removeHandler('clipboard:readText');
   ipcMain.removeHandler('shell:openExternal');
   ipcMain.removeHandler('finder:installServices');
+  ipcMain.removeHandler('dockterm:take-opens');
   ipcMain.removeAllListeners('window:minimize');
   ipcMain.removeAllListeners('window:maximize');
   ipcMain.removeAllListeners('window:close');
@@ -522,9 +605,8 @@ function wireWindowControls() {
     await shell.openExternal(target);
     return true;
   });
-  ipcMain.handle('finder:installServices', async () =>
-    installFinderServices(app.getPath('exe'))
-  );
+  ipcMain.handle('finder:installServices', async () => installFolderMenus());
+  ipcMain.handle('dockterm:take-opens', (event) => takeOpensForContents(event.sender));
 }
 
 /** http(s), mailto, and common app deep-links — reject javascript: etc. */
@@ -568,6 +650,8 @@ function buildWindowOptions() {
   if (process.platform === 'darwin') {
     windowOpts.titleBarStyle = 'hidden';
     windowOpts.trafficLightPosition = { x: 14, y: 12 };
+    // Unique id so macOS does not merge extra BrowserWindows into one tabbed frame.
+    windowOpts.tabbingIdentifier = `dockterm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   } else {
     windowOpts.frame = false;
   }
@@ -632,7 +716,7 @@ function installAppMenu() {
         {
           label: 'Install Finder Menu Items…',
           click: () => {
-            const result = installFinderServices(app.getPath('exe'));
+            const result = installFolderMenus();
             if (result.ok) {
               dialog.showMessageBox({
                 type: 'info',
@@ -708,22 +792,42 @@ function installAppMenu() {
       ],
     });
   } else {
-    template.push({
-      label: 'File',
-      submenu: [
-        {
-          label: 'New Window',
-          accelerator: 'CmdOrCtrl+Shift+N',
-          click: () => {
-            void createWindow({ primary: false }).catch((err) => {
-              logLine(`New Window failed: ${err?.message || err}`);
-            });
-          },
+    /** @type {import('electron').MenuItemConstructorOptions[]} */
+    const fileSubmenu = [
+      {
+        label: 'New Window',
+        accelerator: 'CmdOrCtrl+Shift+N',
+        click: () => {
+          void createWindow({ primary: false }).catch((err) => {
+            logLine(`New Window failed: ${err?.message || err}`);
+          });
         },
-        { type: 'separator' },
-        { role: 'quit' },
-      ],
-    });
+      },
+    ];
+    if (process.platform === 'win32') {
+      fileSubmenu.push({
+        label: 'Install Explorer Menu Items…',
+        click: () => {
+          const result = installFolderMenus();
+          if (result.ok) {
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Explorer menu items',
+              message: 'Explorer menu items installed',
+              detail:
+                'Right-click a folder in Explorer:\n\n• New DockTerm Tab at Folder\n• New DockTerm at Folder\n\nIf they do not appear yet, restart Explorer or sign out/in.',
+            });
+          } else {
+            dialog.showErrorBox(
+              'Could not install Explorer menu items',
+              result.error || 'Unknown error'
+            );
+          }
+        },
+      });
+    }
+    fileSubmenu.push({ type: 'separator' }, { role: 'quit' });
+    template.push({ label: 'File', submenu: fileSubmenu });
   }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -773,7 +877,7 @@ function wireContextMenu(win) {
 }
 
 /**
- * @param {{ primary?: boolean }} [opts]
+ * @param {{ primary?: boolean, skipSplash?: boolean }} [opts]
  * @returns {Promise<import('electron').BrowserWindow>}
  */
 async function createWindow(opts = {}) {
@@ -787,6 +891,7 @@ async function createWindow(opts = {}) {
 
   wireContextMenu(win);
   wireTerminalEditShortcuts(win);
+  wireNavigationGuard(win);
 
   win.once('ready-to-show', () => {
     win.show();
@@ -817,19 +922,20 @@ async function createWindow(opts = {}) {
     }
   });
 
-  win.webContents.on('did-finish-load', () => {
-    const url = win.webContents.getURL() || '';
-    if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-      flushPendingFolderOpens(win);
-    }
-  });
-
-  // Show splash immediately while backend boots.
-  const splashPath = path.join(__dirname, 'splash.html');
-  await win.loadFile(splashPath);
-
   const port = await ensureBackend();
+  if (asPrimary && !opts.skipSplash) {
+    const splashPath = path.join(__dirname, 'splash.html');
+    await win.loadFile(splashPath);
+  }
   await win.loadURL(`http://127.0.0.1:${port}`);
+  try {
+    win.webContents.navigationHistory?.clear?.();
+    if (typeof win.webContents.clearHistory === 'function') {
+      win.webContents.clearHistory();
+    }
+  } catch {
+    /* ignore */
+  }
   return win;
 }
 
@@ -845,45 +951,36 @@ function shutdown() {
   serverPort = null;
 }
 
-// Single instance so Finder "Tab" opens reuse the running app.
+// Single instance. macOS also uses LSMultipleInstancesProhibited + open-url.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // Must register before ready — macOS delivers the launch URL immediately.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    const req = parseOpenRequestFromUrl(url);
+    if (req) applyOpen(req);
+  });
+
   app.on('second-instance', (_event, argv) => {
-    handleArgvOpens(argv);
+    const reqs = argvOpenRequests(argv);
+    if (reqs.length) {
+      for (const req of reqs) applyOpen(req);
+      return;
+    }
     const win = anyLiveWindow();
     if (win) showWindow(win);
     else showPrimaryWindow();
   });
 
-  // open-url can arrive before ready on macOS.
-  app.on('open-url', (event, url) => {
-    event.preventDefault();
-    const req = parseOpenRequestFromUrl(url);
-    if (req) {
-      if (app.isReady()) void enqueueFolderOpens([req]);
-      else pendingFolderOpens.push(req);
-    }
-  });
-
-  app.on('open-file', (event, filePath) => {
-    event.preventDefault();
-    const cwd = normalizeFolderPath(filePath);
-    if (!cwd) return;
-    const req = { mode: 'tab', cwd };
-    if (app.isReady()) void enqueueFolderOpens([req]);
-    else pendingFolderOpens.push(req);
-  });
-
   app.whenReady().then(() => {
-    // Custom protocol: dockterm://new-tab?path=... / dockterm://new-window?path=...
-    try {
-      if (!app.isDefaultProtocolClient('dockterm')) {
-        app.setAsDefaultProtocolClient('dockterm');
+    registerDocktermProtocol();
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      const folderMenus = installFolderMenus();
+      if (!folderMenus.ok) {
+        logLine(`folder menu install skipped: ${folderMenus.error || 'unknown'}`);
       }
-    } catch (err) {
-      logLine(`protocol register failed: ${err?.message || err}`);
     }
 
     wireWindowControls();
@@ -900,21 +997,11 @@ if (!gotLock) {
       }
     }
 
-    // Queue cold-start opens; apply after the primary window exists
-    // so we don't race-create a second window.
-    {
-      const cold = parseOpenRequestsFromArgv(process.argv || [])
-        .map((r) => ({
-          mode: r.mode === 'window' ? 'window' : 'tab',
-          cwd: normalizeFolderPath(r.cwd),
-        }))
-        .filter((r) => r.cwd);
-      pendingFolderOpens.push(...cold);
-    }
+    applyArgv(process.argv || []);
 
     createWindow({ primary: true })
       .then((win) => {
-        flushPendingFolderOpens(win);
+        applyStartupOpens(win);
       })
       .catch((err) => {
         logLine(`DockTerm failed to start: ${err?.stack || err}`);

@@ -127,6 +127,21 @@ export default function App() {
     };
   }, []);
 
+  // Mouse back/forward must not walk Electron history (splash ↔ app).
+  useEffect(() => {
+    const block = (e) => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    };
+    window.addEventListener('mouseup', block, true);
+    window.addEventListener('mousedown', block, true);
+    window.addEventListener('auxclick', block, true);
+    return () => {
+      window.removeEventListener('mouseup', block, true);
+      window.removeEventListener('mousedown', block, true);
+      window.removeEventListener('auxclick', block, true);
+    };
+  }, []);
+
   // If SSH output already includes a shell prompt but no further chunks arrive
   // (common after MOTD), promote connecting → connected on a short poll.
   useEffect(() => {
@@ -677,11 +692,13 @@ export default function App() {
     [requestCreate]
   );
 
-  // Finder / CLI: open a local terminal tab at a folder.
+  // Finder / protocol: open a local terminal tab at a folder.
+  const addTabRef = useRef(addTab);
+  addTabRef.current = addTab;
   useEffect(() => {
     const api = typeof window !== 'undefined' ? window.dockterm : null;
     if (!api?.onOpenFolder) return undefined;
-    return api.onOpenFolder((payload) => {
+    const apply = (payload) => {
       const cwd = String(payload?.cwd || '').trim();
       if (!cwd) return;
       const parts = cwd.split(/[/\\]/).filter(Boolean);
@@ -689,9 +706,16 @@ export default function App() {
       setHostDetail(null);
       setSnippetDetail(null);
       setHistoryDetail(null);
-      addTab({ cwd, title });
-    });
-  }, [addTab]);
+      addTabRef.current({ cwd, title });
+    };
+    const unsub = api.onOpenFolder(apply);
+    Promise.resolve(api.takeFolderOpens?.())
+      .then((items) => {
+        if (Array.isArray(items)) items.forEach(apply);
+      })
+      .catch(() => {});
+    return unsub;
+  }, []);
 
   const splitActive = useCallback(
     (direction, groupIdArg) => {

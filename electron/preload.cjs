@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('dockterm', {
   clipboardRead: () => ipcRenderer.invoke('clipboard:readText'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   installFinderServices: () => ipcRenderer.invoke('finder:installServices'),
+  takeFolderOpens: () => ipcRenderer.invoke('dockterm:take-opens'),
   onOpenFolder: (handler) => {
     const listener = (_event, payload) => {
       try {

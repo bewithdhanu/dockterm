@@ -126,6 +126,14 @@
         i = (i + 1) % messages.length;
         el.textContent = messages[i];
       }, 1400);
+
+      window.addEventListener(
+        'mouseup',
+        (e) => {
+          if (e.button === 3 || e.button === 4) e.preventDefault();
+        },
+        true
+      );
     </script>
   </body>
 </html>

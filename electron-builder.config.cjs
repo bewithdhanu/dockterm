@@ -43,23 +43,22 @@ module.exports = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     notarize: false,
     extendInfo: {
+      LSMultipleInstancesProhibited: true,
       CFBundleURLTypes: [
         {
           CFBundleURLName: 'DockTerm folder open',
           CFBundleURLSchemes: ['dockterm'],
         },
       ],
-      CFBundleDocumentTypes: [
-        {
-          CFBundleTypeName: 'Folder',
-          CFBundleTypeRole: 'Viewer',
-          LSHandlerRank: 'Alternate',
-          LSItemContentTypes: ['public.folder'],
-        },
-      ],
     },
   },
   afterSign: 'scripts/notarize.cjs',
+  protocols: [
+    {
+      name: 'DockTerm folder open',
+      schemes: ['dockterm'],
+    },
+  ],
   win: {
     icon: 'build/icon.png',
     target: ['nsis'],
