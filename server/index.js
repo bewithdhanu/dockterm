@@ -8,7 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
-import { listSshHosts, readRawConfig, writeRawConfig, upsertHost, deleteHost, getConfigPath, resolveSshConnectTarget } from './sshConfig.js';
+import { listSshHosts, readRawConfig, writeRawConfig, upsertHost, deleteHost, getConfigPath, resolveSshConnectTarget, findSshHost } from './sshConfig.js';
 import {
   listSnippets,
   createSnippet,
@@ -40,6 +40,7 @@ import {
   fmDownload,
   fmUpload,
 } from './fileManager.js';
+import { getHostPassword, setHostPassword } from './hostPasswords.js';
 import { pickIdentityFileNative } from './pickFile.js';
 import { readIdentityPreview } from './identityPreview.js';
 import { detectHostOs } from './detectHostOs.js';
@@ -126,6 +127,25 @@ app.put('/api/ssh-hosts/:alias', (req, res) => {
     const originalAlias = decodeURIComponent(req.params.alias);
     const host = upsertHost(req.body || {}, { originalAlias });
     res.json({ ok: true, host, hosts: listSshHosts() });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: message });
+  }
+});
+
+app.put('/api/ssh-hosts/:alias/password', (req, res) => {
+  try {
+    const alias = decodeURIComponent(req.params.alias);
+    const host = findSshHost(alias);
+    if (!host) {
+      return res.status(404).json({ error: `Host "${alias}" not found` });
+    }
+    const password = req.body?.password;
+    if (typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
+    setHostPassword(host.sshAlias, password);
+    res.json({ ok: true, passwordSaved: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(400).json({ error: message });
@@ -416,6 +436,25 @@ function createPty(cols = 80, rows = 24, { cwd } = {}) {
   throw lastError || new Error('PTY spawn failed for all shells');
 }
 
+function stripAnsi(text) {
+  return String(text || '')
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\r/g, '');
+}
+
+/** Write a saved password once, when OpenSSH actually asks for it. */
+function maybeSendSavedPassword(term, data, notify) {
+  const secret = term?.__savedPassword;
+  if (!secret || term.__passwordSent) return;
+  const tail = `${term.__pwTail || ''}${stripAnsi(data)}`.slice(-400);
+  term.__pwTail = tail;
+  if (!/password:\s*$/i.test(tail)) return;
+  term.__passwordSent = true;
+  term.__savedPassword = null;
+  term.write(`${secret}\n`);
+  notify?.();
+}
+
 function releasePtyExtras(term) {
   if (!term) return;
   try {
@@ -424,6 +463,7 @@ function releasePtyExtras(term) {
     /* ignore */
   }
   term.__cleanupIdentity = null;
+  term.__savedPassword = null;
 }
 
 function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
@@ -507,13 +547,22 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
   term.__sshHost = alias;
   term.__cwd = remoteCwd || null;
   term.__cleanupIdentity = identityCleanup;
+  if (passwordAuth) {
+    term.__savedPassword = getHostPassword(alias);
+  }
   console.log(
     `SSH PTY spawned: ${sshBin} ${alias}${
-      passwordAuth ? ' (password)' : identityPath ? ' (session identity)' : ''
+      passwordAuth
+        ? term.__savedPassword
+          ? ' (saved password)'
+          : ' (password)'
+        : identityPath
+          ? ' (session identity)'
+          : ''
     }`
   );
 
-  if (remoteCwd && typeof remoteCwd === 'string' && remoteCwd.trim()) {
+  if (remoteCwd && typeof remoteCwd === 'string' && remoteCwd.trim() && !passwordAuth) {
     const cdCmd = `cd ${escapeShellArg(remoteCwd.trim())}\n`;
     setTimeout(() => {
       try {
@@ -597,6 +646,9 @@ wss.on('connection', (ws) => {
         ensureMeta(id);
 
         term.onData((data) => {
+          maybeSendSavedPassword(term, data, () => {
+            send({ type: 'ssh-password-sent', id });
+          });
           noteBytes(id, 'out', byteLen(data));
           send({ type: 'output', id, data });
         });

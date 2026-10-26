@@ -451,7 +451,9 @@ export function HostDetails({
                 <div className="identity-file-block">
                   <div className="detail-label">Authentication</div>
                   <div className="identity-file-empty">
-                    Password — typed in the terminal, not saved
+                    {host.passwordSaved
+                      ? 'Password saved. The next connection signs in automatically.'
+                      : 'Password is entered on connect. Save it there to skip the prompt next time.'}
                   </div>
                 </div>
               ) : (

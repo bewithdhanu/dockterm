@@ -2,6 +2,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
+import {
+  deleteHostPassword,
+  hasHostPassword,
+  renameHostPassword,
+} from './hostPasswords.js';
 
 /**
  * SSH config helpers: list hosts, read/write main ~/.ssh/config,
@@ -360,6 +365,9 @@ export function listSshHosts() {
             ? normalizeIdentityFile(block.values.identityfile)
             : null,
         auth: block.passwordAuth ? 'password' : 'key',
+        passwordSaved: block.passwordAuth
+          ? hasHostPassword(sshAlias)
+          : false,
         editable: Boolean(block.isMain && block.singleAlias),
         sourceFile: block.sourceFile,
       });
@@ -503,6 +511,13 @@ export function upsertHost(input, { originalAlias } = {}) {
     writeRawConfig(next);
   }
 
+  if (old && old.sshAlias !== sshAlias) {
+    renameHostPassword(old.sshAlias, sshAlias);
+  }
+  if (auth !== 'password') {
+    deleteHostPassword(sshAlias);
+  }
+
   return listSshHosts().find(
     (h) => h.sshAlias.toLowerCase() === sshAlias.toLowerCase()
   );
@@ -530,5 +545,6 @@ export function deleteHost(alias) {
 
   const next = [...lines.slice(0, start), ...lines.slice(end + 1)];
   writeRawConfig(next.join('\n').replace(/\n*$/, '\n'));
+  deleteHostPassword(existing.sshAlias);
   return { deleted: existing.alias, sshAlias: existing.sshAlias };
 }

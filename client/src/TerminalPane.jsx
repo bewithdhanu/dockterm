@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LuCheck, LuCopy } from 'react-icons/lu';
+import { LuCheck, LuCopy, LuEye, LuEyeOff } from 'react-icons/lu';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -313,13 +313,17 @@ function deriveSshBanner(text, mode, host, opts = {}) {
           ? 'Enter the passphrase for your private key.'
           : authKind === 'otp'
             ? 'Enter the one-time verification code.'
-            : 'Enter your SSH password in the terminal.',
+            : 'Enter the password for this host.',
       detail: null,
       facts,
       steps: CONNECT_STEPS,
       stepIndex: 3,
       confirm: null,
-      hint: 'Type directly in the terminal — input is not echoed here.',
+      authKind,
+      hint:
+        authKind === 'password'
+          ? null
+          : 'Type directly in the terminal — input is not echoed here.',
     };
   }
 
@@ -478,6 +482,12 @@ export function TerminalPane({
   const hasHistoryRef = useRef(Boolean(initialScrollback));
   const sshStatusRef = useRef(sshStatus);
   const sshHostRef = useRef(sshHost);
+  const passwordInputRef = useRef(null);
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState(null);
+  const [savedPasswordSent, setSavedPasswordSent] = useState(false);
   const cwdRef = useRef(null);
   const outTailRef = useRef('');
   const typedLineRef = useRef('');
@@ -831,6 +841,7 @@ export function TerminalPane({
         }
         handleLiveOutput(data);
       },
+      onPasswordSent: () => setSavedPasswordSent(true),
       onExit: (code) => {
         if (isSsh) {
           // Connection-phase failure only — keep toast so the user can read why.
@@ -1121,9 +1132,13 @@ export function TerminalPane({
     connectStartedAt,
   ]);
 
-  // Focus when password / OTP is needed so the user can type without clicking.
+  // Focus the password field, or the terminal for passphrase / OTP.
   useEffect(() => {
     if (!active || !banner || banner.kind !== 'auth') return;
+    if (banner.authKind === 'password' && !savedPasswordSent) {
+      passwordInputRef.current?.focus();
+      return;
+    }
     const term = termRef.current;
     if (!term) return;
     try {
@@ -1131,17 +1146,54 @@ export function TerminalPane({
     } catch {
       /* ignore */
     }
-  }, [active, banner?.kind]);
+  }, [active, banner?.kind, banner?.authKind, savedPasswordSent]);
+
+  useEffect(() => {
+    const text = overlay?.text || '';
+    if (/permission denied|authentication failed/i.test(text)) {
+      setSavedPasswordSent(false);
+    }
+  }, [overlay?.text]);
 
   const sendConnectReply = (data) => {
     if (data === 'yes\n' || data === 'no\n') {
       setHostKeyAnswered(true);
     }
     sendRef.current({ type: 'input', id, data });
+    if (!String(data).includes('\n') || data === 'yes\n' || data === 'no\n') {
+      try {
+        termRef.current?.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  const submitPassword = async (save) => {
+    const value = passwordDraft;
+    if (!value || passwordBusy) return;
+    setPasswordBusy(true);
+    setPasswordError(null);
     try {
-      termRef.current?.focus();
-    } catch {
-      /* ignore */
+      if (save && sshHost) {
+        const res = await fetch(
+          `/api/ssh-hosts/${encodeURIComponent(sshHost)}/password`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: value }),
+          }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not save password');
+      }
+      sendConnectReply(`${value}\n`);
+      setPasswordDraft('');
+      setSavedPasswordSent(true);
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPasswordBusy(false);
     }
   };
 
@@ -1357,6 +1409,65 @@ export function TerminalPane({
             ) : null}
             <pre className="ssh-connect-toast-log">{logText}</pre>
           </div>
+
+          {banner.kind === 'auth' && banner.authKind === 'password' ? (
+            savedPasswordSent ? (
+              <p className="ssh-connect-password-status">Signing in…</p>
+            ) : (
+              <form
+                className="ssh-connect-password"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitPassword(true);
+                }}
+              >
+                <div className="ssh-connect-password-field">
+                  <input
+                    ref={passwordInputRef}
+                    type={passwordVisible ? 'text' : 'password'}
+                    value={passwordDraft}
+                    autoComplete="current-password"
+                    placeholder="Password"
+                    disabled={passwordBusy}
+                    onChange={(e) => setPasswordDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="ssh-connect-password-toggle"
+                    aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                    title={passwordVisible ? 'Hide password' : 'Show password'}
+                    onClick={() => setPasswordVisible((v) => !v)}
+                  >
+                    {passwordVisible ? (
+                      <LuEyeOff size={15} aria-hidden="true" />
+                    ) : (
+                      <LuEye size={15} aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                {passwordError ? (
+                  <p className="ssh-connect-password-error">{passwordError}</p>
+                ) : null}
+                <div className="ssh-connect-toast-actions">
+                  <button
+                    type="button"
+                    className="ssh-connect-toast-btn"
+                    disabled={passwordBusy || !passwordDraft}
+                    onClick={() => void submitPassword(false)}
+                  >
+                    Log in
+                  </button>
+                  <button
+                    type="submit"
+                    className="ssh-connect-toast-btn primary"
+                    disabled={passwordBusy || !passwordDraft}
+                  >
+                    Save and log in
+                  </button>
+                </div>
+              </form>
+            )
+          ) : null}
 
           {banner.confirm === 'hostkey' ? (
             <div className="ssh-connect-toast-actions">

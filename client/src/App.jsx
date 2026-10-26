@@ -554,6 +554,11 @@ export default function App() {
           return;
         }
 
+        if (msg.type === 'ssh-password-sent') {
+          handlersRef.current.get(msg.id)?.onPasswordSent?.();
+          return;
+        }
+
         if (msg.type === 'output') {
           const h = handlersRef.current.get(msg.id);
           if (h?.onOutput) h.onOutput(msg.data);

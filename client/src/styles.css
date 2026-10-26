@@ -1867,6 +1867,71 @@ body,
   }
 }
 
+.ssh-connect-toast.mode-auth {
+  max-height: min(86%, 560px);
+}
+
+.ssh-connect-password {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssh-connect-password-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 0 6px 0 10px;
+}
+
+.ssh-connect-password-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 0;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.ssh-connect-password-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.ssh-connect-password-toggle:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.ssh-connect-password-error,
+.ssh-connect-password-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ssh-connect-password-error {
+  color: #ffb4b4;
+}
+
+.ssh-connect-password-status {
+  color: var(--muted);
+}
+
 .ssh-connect-toast-actions {
   display: flex;
   justify-content: flex-end;
@@ -1890,6 +1955,12 @@ body,
 
 .ssh-connect-toast-btn:hover {
   filter: brightness(1.08);
+}
+
+.ssh-connect-toast-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
 }
 
 .ssh-connect-toast-btn.quiet {
