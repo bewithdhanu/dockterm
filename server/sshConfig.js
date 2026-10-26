@@ -13,6 +13,7 @@ import { createHash } from 'crypto';
  */
 
 const DOCKTERM_ALIAS_RE = /^#\s*DockTerm-Alias:\s*(.+)$/i;
+const DOCKTERM_AUTH_RE = /^#\s*DockTerm-Auth:\s*(password|key)\s*$/i;
 
 function expandHome(p) {
   if (!p) return p;
@@ -147,6 +148,11 @@ function readConfigFile(filePath, seen = new Set(), sourceLabel = null) {
       const label = trimmed.match(DOCKTERM_ALIAS_RE);
       if (label) {
         current.displayAlias = String(label[1] || '').trim() || null;
+        current.endLine = i;
+      }
+      const auth = trimmed.match(DOCKTERM_AUTH_RE);
+      if (auth && String(auth[1]).toLowerCase() === 'password') {
+        current.passwordAuth = true;
         current.endLine = i;
       }
       continue;
@@ -296,15 +302,19 @@ function formatHostBlock({
   user,
   port,
   identityFile,
+  auth,
 }) {
   const lines = [`Host ${sshAlias}`];
   if (displayAlias && displayAlias !== sshAlias) {
     lines.push(`  # DockTerm-Alias: ${displayAlias}`);
   }
+  if (auth === 'password') {
+    lines.push('  # DockTerm-Auth: password');
+  }
   if (hostName) lines.push(`  HostName ${hostName}`);
   if (user) lines.push(`  User ${user}`);
   if (port) lines.push(`  Port ${port}`);
-  if (identityFile) {
+  if (auth !== 'password' && identityFile) {
     lines.push(`  IdentityFile ${formatConfigPathArg(identityFile)}`);
   }
   return `${lines.join('\n')}\n`;
@@ -318,6 +328,7 @@ function formatHostBlock({
  *  user: string | null,
  *  port: string | null,
  *  identityFile: string | null,
+ *  auth: 'key' | 'password',
  *  editable: boolean,
  *  sourceFile: string
  * }>}
@@ -343,9 +354,12 @@ export function listSshHosts() {
         hostName: block.values.hostname || sshAlias,
         user: block.values.user || null,
         port: block.values.port || null,
-        identityFile: block.values.identityfile
-          ? normalizeIdentityFile(block.values.identityfile)
-          : null,
+        identityFile: block.passwordAuth
+          ? null
+          : block.values.identityfile
+            ? normalizeIdentityFile(block.values.identityfile)
+            : null,
+        auth: block.passwordAuth ? 'password' : 'key',
         editable: Boolean(block.isMain && block.singleAlias),
         sourceFile: block.sourceFile,
       });
@@ -405,7 +419,11 @@ export function upsertHost(input, { originalAlias } = {}) {
   const hostName = sanitizeField(input.hostName, 'HostName');
   const user = sanitizeField(input.user, 'User');
   const port = sanitizeField(input.port, 'Port');
-  const identityFile = sanitizeField(input.identityFile, 'IdentityFile');
+  const auth = input.auth === 'password' ? 'password' : 'key';
+  const identityFile =
+    auth === 'password'
+      ? null
+      : sanitizeField(input.identityFile, 'IdentityFile');
 
   if (port && !/^\d+$/.test(port)) {
     throw new Error('Port must be a number');
@@ -465,6 +483,7 @@ export function upsertHost(input, { originalAlias } = {}) {
     user,
     port,
     identityFile,
+    auth,
   }).replace(/\n$/, '');
 
   if (old) {

@@ -44,8 +44,10 @@ import { pickIdentityFileNative } from './pickFile.js';
 import { readIdentityPreview } from './identityPreview.js';
 import { detectHostOs } from './detectHostOs.js';
 import {
+  hostUsesPassword,
   prepareIdentityForAlias,
   sshIdentityArgs,
+  sshPasswordArgs,
 } from './sshSessionIdentity.js';
 import {
   getProcessCwd,
@@ -449,18 +451,22 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
 
   // Config keeps IdentityFile path; session auth uses key *contents* via a
   // 0600 temp file so OpenSSH won't fail on world-readable PEMs.
+  // Password hosts skip keys and the agent so the PTY gets a password prompt.
+  const passwordAuth = hostUsesPassword(alias);
   let identityCleanup = null;
   let identityPath = null;
-  try {
-    const prepared = prepareIdentityForAlias(alias);
-    if (prepared) {
-      identityPath = prepared.path;
-      identityCleanup = prepared.cleanup;
+  if (!passwordAuth) {
+    try {
+      const prepared = prepareIdentityForAlias(alias);
+      if (prepared) {
+        identityPath = prepared.path;
+        identityCleanup = prepared.cleanup;
+      }
+    } catch (err) {
+      throw new Error(
+        err instanceof Error ? err.message : `Identity prepare failed: ${err}`
+      );
     }
-  } catch (err) {
-    throw new Error(
-      err instanceof Error ? err.message : `Identity prepare failed: ${err}`
-    );
   }
 
   const args = [
@@ -472,7 +478,7 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
     'ConnectTimeout=30',
     '-o',
     'ConnectionAttempts=1',
-    ...sshIdentityArgs(identityPath),
+    ...(passwordAuth ? sshPasswordArgs() : sshIdentityArgs(identityPath)),
     alias,
   ];
 
@@ -502,7 +508,9 @@ function createSshPty(hostAlias, cols = 80, rows = 24, { remoteCwd } = {}) {
   term.__cwd = remoteCwd || null;
   term.__cleanupIdentity = identityCleanup;
   console.log(
-    `SSH PTY spawned: ${sshBin} ${alias}${identityPath ? ' (session identity)' : ''}`
+    `SSH PTY spawned: ${sshBin} ${alias}${
+      passwordAuth ? ' (password)' : identityPath ? ' (session identity)' : ''
+    }`
   );
 
   if (remoteCwd && typeof remoteCwd === 'string' && remoteCwd.trim()) {

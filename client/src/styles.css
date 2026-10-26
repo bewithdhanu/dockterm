@@ -1396,7 +1396,8 @@ body,
   color: var(--muted);
 }
 
-.host-form input {
+.host-form input,
+.host-form select {
   appearance: none;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -1408,7 +1409,8 @@ body,
   outline: none;
 }
 
-.host-form input:focus {
+.host-form input:focus,
+.host-form select:focus {
   border-color: #3b82f6;
 }
 
@@ -4715,7 +4717,8 @@ body.split-dragging-row * {
   letter-spacing: 0.03em;
 }
 
-.detail-edit-field input {
+.detail-edit-field input,
+.detail-edit-field select {
   appearance: none;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -4727,7 +4730,8 @@ body.split-dragging-row * {
   outline: none;
 }
 
-.detail-edit-field input:focus {
+.detail-edit-field input:focus,
+.detail-edit-field select:focus {
   border-color: var(--accent);
 }
 

@@ -32,8 +32,14 @@ function ensureCacheDir() {
  */
 export function identityFileForAlias(alias) {
   const host = findSshHost(alias);
+  if (host?.auth === 'password') return null;
   const p = host?.identityFile ? String(host.identityFile).trim() : '';
   return p || null;
+}
+
+/** Host is saved as password auth (no key / no agent). */
+export function hostUsesPassword(alias) {
+  return findSshHost(alias)?.auth === 'password';
 }
 
 /**
@@ -134,6 +140,21 @@ export function sshIdentityArgs(identityPath) {
   ];
 }
 
+/**
+ * Skip agent and IdentityFile so the server offers a password prompt.
+ * OpenSSH otherwise burns MaxAuthTries on ssh-agent keys first.
+ */
+export function sshPasswordArgs() {
+  return [
+    '-o',
+    'PubkeyAuthentication=no',
+    '-o',
+    'PreferredAuthentications=keyboard-interactive,password',
+    '-o',
+    'NumberOfPasswordPrompts=3',
+  ];
+}
+
 function selfCheck() {
   const dir = ensureCacheDir();
   const loose = path.join(dir, `loose-${process.pid}.pem`);
@@ -164,6 +185,10 @@ function selfCheck() {
     }
     if (!args.includes('IdentityFile=none')) {
       throw new Error('sshIdentityArgs missing IdentityFile=none');
+    }
+    const pw = sshPasswordArgs();
+    if (!pw.includes('PubkeyAuthentication=no')) {
+      throw new Error('sshPasswordArgs missing PubkeyAuthentication=no');
     }
     console.log('sshSessionIdentity self-check ok');
   } finally {

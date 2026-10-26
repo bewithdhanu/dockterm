@@ -137,6 +137,7 @@ function InlineHostEditor({ host, onCancel, onSaved }) {
   const [identityFile, setIdentityFile] = useState(
     displayIdentityPath(host.identityFile) || ''
   );
+  const [auth, setAuth] = useState(host.auth === 'password' ? 'password' : 'key');
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState(null);
@@ -147,6 +148,7 @@ function InlineHostEditor({ host, onCancel, onSaved }) {
     setUser(host.user || '');
     setPort(host.port || '');
     setIdentityFile(displayIdentityPath(host.identityFile) || '');
+    setAuth(host.auth === 'password' ? 'password' : 'key');
     setError(null);
   }, [host]);
 
@@ -173,7 +175,8 @@ function InlineHostEditor({ host, onCancel, onSaved }) {
         hostName: hostName.trim(),
         user: user.trim(),
         port: port.trim(),
-        identityFile: identityFile.trim(),
+        identityFile: auth === 'password' ? '' : identityFile.trim(),
+        auth,
       };
       const res = await fetch(
         `/api/ssh-hosts/${encodeURIComponent(host.alias)}`,
@@ -232,13 +235,30 @@ function InlineHostEditor({ host, onCancel, onSaved }) {
             inputMode="numeric"
           />
         </label>
-        <IdentityEditRow
-          value={identityFile}
-          busy={saving || picking}
-          onBrowse={browseIdentity}
-          onChange={setIdentityFile}
-          onRemove={() => setIdentityFile('')}
-        />
+        <label className="detail-edit-field">
+          <span>Authentication</span>
+          <select
+            value={auth}
+            onChange={(e) => setAuth(e.target.value)}
+            disabled={saving || picking}
+          >
+            <option value="key">SSH key</option>
+            <option value="password">Password</option>
+          </select>
+        </label>
+        {auth === 'password' ? (
+          <p className="detail-hint">
+            Password is typed in the terminal when you connect. It is not saved.
+          </p>
+        ) : (
+          <IdentityEditRow
+            value={identityFile}
+            busy={saving || picking}
+            onBrowse={browseIdentity}
+            onChange={setIdentityFile}
+            onRemove={() => setIdentityFile('')}
+          />
+        )}
       </div>
       <div className="detail-actions">
         <button type="submit" className="btn primary" disabled={saving}>
@@ -427,7 +447,16 @@ export function HostDetails({
             </div>
 
             <div className="detail-section">
-              <IdentityDetailsView filePath={host.identityFile} />
+              {host.auth === 'password' ? (
+                <div className="identity-file-block">
+                  <div className="detail-label">Authentication</div>
+                  <div className="identity-file-empty">
+                    Password — typed in the terminal, not saved
+                  </div>
+                </div>
+              ) : (
+                <IdentityDetailsView filePath={host.identityFile} />
+              )}
             </div>
 
             <div className="detail-actions">

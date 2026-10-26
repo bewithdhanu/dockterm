@@ -33,6 +33,9 @@ function useHostFormState(initial) {
   const [identityFile, setIdentityFile] = useState(
     (initial?.identityFile || '').replace(/^["']|["']$/g, '')
   );
+  const [auth, setAuth] = useState(
+    initial?.auth === 'password' ? 'password' : 'key'
+  );
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState(null);
@@ -43,6 +46,7 @@ function useHostFormState(initial) {
     setUser(initial?.user || '');
     setPort(initial?.port || '');
     setIdentityFile((initial?.identityFile || '').replace(/^["']|["']$/g, ''));
+    setAuth(initial?.auth === 'password' ? 'password' : 'key');
     setError(null);
   }, [
     initial?.alias,
@@ -50,6 +54,7 @@ function useHostFormState(initial) {
     initial?.user,
     initial?.port,
     initial?.identityFile,
+    initial?.auth,
   ]);
 
   return {
@@ -63,6 +68,8 @@ function useHostFormState(initial) {
     setPort,
     identityFile,
     setIdentityFile,
+    auth,
+    setAuth,
     saving,
     setSaving,
     picking,
@@ -101,6 +108,8 @@ function HostFormFields({
   setPort,
   identityFile,
   setIdentityFile,
+  auth,
+  setAuth,
   saving,
   picking,
   browseIdentity,
@@ -144,14 +153,31 @@ function HostFormFields({
           inputMode="numeric"
         />
       </label>
-      <IdentityFileField
-        label="IdentityFile"
-        value={identityFile}
-        busy={saving || picking}
-        onBrowse={browseIdentity}
-        onChange={setIdentityFile}
-        onClear={() => setIdentityFile('')}
-      />
+      <label>
+        <span>Authentication</span>
+        <select
+          value={auth}
+          onChange={(e) => setAuth(e.target.value)}
+          disabled={saving || picking}
+        >
+          <option value="key">SSH key</option>
+          <option value="password">Password</option>
+        </select>
+      </label>
+      {auth === 'password' ? (
+        <p className="detail-hint">
+          Password is typed in the terminal when you connect. It is not saved.
+        </p>
+      ) : (
+        <IdentityFileField
+          label="IdentityFile"
+          value={identityFile}
+          busy={saving || picking}
+          onBrowse={browseIdentity}
+          onChange={setIdentityFile}
+          onClear={() => setIdentityFile('')}
+        />
+      )}
     </>
   );
 }
@@ -195,7 +221,8 @@ export function HostDetailPanel({
           hostName: form.hostName.trim(),
           user: form.user.trim(),
           port: form.port.trim(),
-          identityFile: form.identityFile.trim(),
+          identityFile: form.auth === 'password' ? '' : form.identityFile.trim(),
+          auth: form.auth,
         },
       });
       onSaved?.(data.hosts || [], data.host || null);
@@ -237,6 +264,7 @@ export function HostDetailPanel({
         user: form.user,
         port: form.port,
         identityFile: form.identityFile,
+        auth: form.auth,
         editable: true,
       });
       return;
@@ -366,7 +394,8 @@ export function HostFormModal({
           hostName: form.hostName.trim(),
           user: form.user.trim(),
           port: form.port.trim(),
-          identityFile: form.identityFile.trim(),
+          identityFile: form.auth === 'password' ? '' : form.identityFile.trim(),
+          auth: form.auth,
         },
       });
       onSaved(data.hosts || []);
